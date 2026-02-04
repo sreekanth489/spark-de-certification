@@ -1,6 +1,6 @@
 # Spark Data Engineering Certification Practice
 
-Practice repository for Databricks Certified Data Engineer Professional certification preparation.
+Comprehensive practice repository for Databricks Certified Data Engineer Professional certification preparation. Covers Spark 3.x features, Delta Lake, Apache Iceberg, and modern lakehouse architecture.
 
 ## Repository Structure
 
@@ -8,7 +8,7 @@ Practice repository for Databricks Certified Data Engineer Professional certific
 spark-de-certification/
 ├── datasets/
 │   ├── csv/              # CSV sample datasets
-│   ├── json/             # JSON sample datasets
+│   ├── json/             # JSON sample datasets (nested structures)
 │   ├── parquet/          # Parquet files (generated)
 │   └── delta/            # Delta tables (generated)
 ├── problems/
@@ -21,8 +21,12 @@ spark-de-certification/
 │   ├── 07_spark_sql/     # SQL operations
 │   ├── 08_file_formats/  # File format handling
 │   ├── 09_performance/   # Performance tuning
-│   └── 10_streaming/     # Structured streaming
-├── solutions/            # Solution files
+│   ├── 10_streaming/     # Structured streaming
+│   ├── 11_delta_lake/    # Delta Lake operations
+│   ├── 12_iceberg/       # Apache Iceberg tables
+│   ├── 13_schema_evolution/  # Schema management
+│   └── 14_advanced_spark/    # Spark 3.x advanced features
+├── solutions/            # Complete solution files
 ├── notebooks/            # Jupyter/Databricks notebooks
 └── requirements.txt
 ```
@@ -109,6 +113,45 @@ spark-de-certification/
 - Watermarks and late data
 - Stream-stream joins
 
+### 11. Delta Lake
+- ACID transactions
+- Time travel and versioning
+- MERGE (upsert) operations
+- Change Data Feed (CDC)
+- Optimization (OPTIMIZE, VACUUM, Z-ORDER)
+- Liquid clustering
+- Deletion vectors
+- UniForm (Iceberg compatibility)
+
+### 12. Apache Iceberg
+- Hidden partitioning (date transforms, bucket, truncate)
+- Schema evolution
+- Partition evolution
+- Table maintenance (expire snapshots, compaction)
+- Branching and tagging
+- Metadata tables
+- Copy-on-Write vs Merge-on-Read
+
+### 13. Schema Evolution
+- Schema enforcement vs evolution
+- Adding/removing/renaming columns
+- Type changes and widening
+- Nested schema evolution
+- Schema validation and drift detection
+- Handling schema changes in streaming
+
+### 14. Advanced Spark Features
+- Spark Connect (Spark 3.4+)
+- Adaptive Query Execution (AQE)
+- Dynamic Partition Pruning
+- Bloom filter joins
+- Pandas API on Spark
+- ANSI SQL mode
+- Higher-order functions
+- Parameterized queries
+- Unity Catalog concepts
+- Photon engine
+
 ## Setup
 
 ### Local Setup (PySpark)
@@ -143,19 +186,25 @@ python problems.py
 
 This repo covers key topics from the Databricks Data Engineer Professional exam:
 
-- [ ] DataFrame API and Spark SQL
-- [ ] Data transformations and aggregations
-- [ ] Joins and window functions
-- [ ] Reading/writing various file formats
-- [ ] Performance optimization
-- [ ] Structured Streaming
-- [ ] Delta Lake operations
-- [ ] Data quality and testing
+- [x] DataFrame API and Spark SQL (Problems 01-04, 07)
+- [x] Data transformations and aggregations (Problems 02-03)
+- [x] Joins and window functions (Problems 04-05)
+- [x] Reading/writing various file formats (Problem 08)
+- [x] Performance optimization (Problem 09)
+- [x] Structured Streaming (Problem 10)
+- [x] Delta Lake operations (Problem 11)
+- [x] Apache Iceberg (Problem 12)
+- [x] Schema evolution and management (Problem 13)
+- [x] Advanced Spark 3.x features (Problem 14)
+- [x] UDFs and Pandas UDFs (Problem 06)
 
 ## Tips for Certification
 
 1. **Hands-on practice** - Run every example, don't just read
 2. **Understand explain plans** - Know how to interpret query plans
-3. **Know the differences** - rank vs dense_rank, repartition vs coalesce
-4. **Performance matters** - Understand broadcast joins, caching, partitioning
-5. **Delta Lake** - If the exam covers Delta, know MERGE, time travel, optimization
+3. **Know the differences** - rank vs dense_rank, repartition vs coalesce, COW vs MOR
+4. **Performance matters** - Understand broadcast joins, caching, partitioning, AQE
+5. **Delta Lake mastery** - MERGE, time travel, CDC, optimization, Z-ORDER
+6. **Schema evolution** - Know compatibility rules for Parquet, Delta, Iceberg
+7. **Streaming fundamentals** - Watermarks, triggers, output modes, exactly-once
+8. **Lakehouse concepts** - Unity Catalog, data governance, table formats
