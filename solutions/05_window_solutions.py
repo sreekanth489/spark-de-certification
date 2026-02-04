@@ -1,41 +1,65 @@
-"""
-Window Functions - Solutions
-=============================
-"""
+# Databricks notebook source
+# MAGIC %md
+# MAGIC # Window Functions - Solutions
+# MAGIC Topics: row_number, rank, dense_rank, lead, lag, running totals, partitioning
 
-from pyspark.sql import SparkSession
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Setup
+
+# COMMAND ----------
+
 from pyspark.sql.window import Window
-from pyspark.sql.functions import col, row_number, rank, dense_rank, ntile
-from pyspark.sql.functions import lead, lag, first, last
-from pyspark.sql.functions import sum, avg, min, max, count
-from pyspark.sql.functions import percent_rank, cume_dist
+from pyspark.sql.functions import (
+    col, row_number, rank, dense_rank, ntile,
+    lead, lag, first, last, sum, avg, min, max, count,
+    percent_rank, cume_dist
+)
 
-spark = SparkSession.builder.appName("Window Solutions").getOrCreate()
+# COMMAND ----------
 
-employees = spark.read.csv("../datasets/csv/employees.csv", header=True, inferSchema=True)
-sales = spark.read.csv("../datasets/csv/sales.csv", header=True, inferSchema=True)
+# Load sample data
+employees = spark.read.csv("datasets/csv/employees.csv", header=True, inferSchema=True)
+sales = spark.read.csv("datasets/csv/sales.csv", header=True, inferSchema=True)
 
-# =============================================================================
-# Problem 1: Row Number
-# =============================================================================
+display(employees)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Problem 1: Row Number
+
+# COMMAND ----------
+
 # a) Row number by salary descending
 window_salary = Window.orderBy(col("salary").desc())
-employees.withColumn("row_num", row_number().over(window_salary)).show()
+df = employees.withColumn("row_num", row_number().over(window_salary))
+display(df)
+
+# COMMAND ----------
 
 # b) Row number within department
 window_dept = Window.partitionBy("department").orderBy(col("salary").desc())
-employees.withColumn("dept_row_num", row_number().over(window_dept)).show()
+df = employees.withColumn("dept_row_num", row_number().over(window_dept))
+display(df)
 
-# c) Highest paid per department
-employees.withColumn("rn", row_number().over(window_dept)) \
+# COMMAND ----------
+
+# c) Highest paid per department using row_number
+df = employees.withColumn("rn", row_number().over(window_dept)) \
     .filter(col("rn") == 1) \
-    .drop("rn") \
-    .show()
+    .drop("rn")
+display(df)
 
+# COMMAND ----------
 
-# =============================================================================
-# Problem 2: Rank and Dense Rank
-# =============================================================================
+# MAGIC %md
+# MAGIC ## Problem 2: Rank and Dense Rank
+
+# COMMAND ----------
+
+# Rank vs Dense Rank comparison
 window_spec = Window.orderBy(col("salary").desc())
 
 df = employees.select(
@@ -43,16 +67,22 @@ df = employees.select(
     rank().over(window_spec).alias("rank"),
     dense_rank().over(window_spec).alias("dense_rank")
 )
-df.show()
+display(df)
+
+# COMMAND ----------
 
 # Rank within department
 window_dept = Window.partitionBy("department").orderBy(col("salary").desc())
-employees.withColumn("dept_rank", rank().over(window_dept)).show()
+df = employees.withColumn("dept_rank", rank().over(window_dept))
+display(df)
 
+# COMMAND ----------
 
-# =============================================================================
-# Problem 3: Lead and Lag
-# =============================================================================
+# MAGIC %md
+# MAGIC ## Problem 3: Lead and Lag
+
+# COMMAND ----------
+
 window_date = Window.orderBy("transaction_date")
 
 sales_with_lag = sales.select(
@@ -64,55 +94,75 @@ sales_with_lag = sales.select(
     (col("unit_price") - lag("unit_price", 1).over(window_date)).alias("price_diff"),
     lag("unit_price", 2).over(window_date).alias("prev_2_price")
 )
-sales_with_lag.show()
+display(sales_with_lag)
 
+# COMMAND ----------
 
-# =============================================================================
-# Problem 4: Running Aggregations
-# =============================================================================
+# MAGIC %md
+# MAGIC ## Problem 4: Running Aggregations
+
+# COMMAND ----------
+
 # Running total
 window_running = Window.orderBy("transaction_date").rowsBetween(Window.unboundedPreceding, Window.currentRow)
 
-sales.withColumn("running_total", sum(col("quantity") * col("unit_price")).over(window_running)).show()
+df = sales.withColumn("running_total", sum(col("quantity") * col("unit_price")).over(window_running))
+display(df.select("transaction_id", "transaction_date", "quantity", "unit_price", "running_total"))
 
-# Cumulative sum within partition
+# COMMAND ----------
+
+# Cumulative sum within partition (department)
 window_dept_running = Window.partitionBy("department") \
     .orderBy("hire_date") \
     .rowsBetween(Window.unboundedPreceding, Window.currentRow)
 
-employees.withColumn("cumulative_salary", sum("salary").over(window_dept_running)).show()
+df = employees.withColumn("cumulative_salary", sum("salary").over(window_dept_running))
+display(df.select("name", "department", "hire_date", "salary", "cumulative_salary"))
 
+# COMMAND ----------
 
-# =============================================================================
-# Problem 5: Moving Averages
-# =============================================================================
+# MAGIC %md
+# MAGIC ## Problem 5: Moving Averages
+
+# COMMAND ----------
+
 # 3-row moving average
 window_moving = Window.orderBy("transaction_date").rowsBetween(-2, 0)
 
-sales.withColumn("moving_avg_3", avg(col("unit_price")).over(window_moving)).show()
+df = sales.withColumn("moving_avg_3", avg(col("unit_price")).over(window_moving))
+display(df.select("transaction_id", "transaction_date", "unit_price", "moving_avg_3"))
 
-# Moving sum over last 5
+# COMMAND ----------
+
+# Moving sum over last 5 rows
 window_5 = Window.orderBy("transaction_date").rowsBetween(-4, 0)
-sales.withColumn("moving_sum_5", sum(col("quantity")).over(window_5)).show()
+df = sales.withColumn("moving_sum_5", sum(col("quantity")).over(window_5))
+display(df.select("transaction_id", "transaction_date", "quantity", "moving_sum_5"))
 
+# COMMAND ----------
 
-# =============================================================================
-# Problem 6: First and Last Values
-# =============================================================================
-window_dept = Window.partitionBy("department").orderBy("hire_date")
+# MAGIC %md
+# MAGIC ## Problem 6: First and Last Values
+
+# COMMAND ----------
+
 window_dept_full = Window.partitionBy("department").orderBy("hire_date") \
     .rowsBetween(Window.unboundedPreceding, Window.unboundedFollowing)
 
-employees.select(
+df = employees.select(
     "name", "department", "hire_date",
     first("hire_date").over(window_dept_full).alias("first_hire"),
     last("hire_date").over(window_dept_full).alias("last_hire")
-).show()
+)
+display(df)
 
+# COMMAND ----------
 
-# =============================================================================
-# Problem 7: Percent Rank and Cumulative Distribution
-# =============================================================================
+# MAGIC %md
+# MAGIC ## Problem 7: Percent Rank and Cumulative Distribution
+
+# COMMAND ----------
+
 window_spec = Window.orderBy("salary")
 
 df = employees.select(
@@ -120,50 +170,68 @@ df = employees.select(
     percent_rank().over(window_spec).alias("percent_rank"),
     cume_dist().over(window_spec).alias("cume_dist")
 )
-df.show()
+display(df)
 
-# Top 10%
+# COMMAND ----------
+
+# Top 10% earners
 df.filter(col("percent_rank") >= 0.9).show()
 
+# COMMAND ----------
 
-# =============================================================================
-# Problem 8: Ntile
-# =============================================================================
+# MAGIC %md
+# MAGIC ## Problem 8: Ntile (Bucketing)
+
+# COMMAND ----------
+
+# 4 salary quartiles
 window_spec = Window.orderBy("salary")
+df = employees.withColumn("quartile", ntile(4).over(window_spec))
+display(df.select("name", "salary", "quartile"))
 
-# 4 quartiles
-employees.withColumn("quartile", ntile(4).over(window_spec)).show()
+# COMMAND ----------
 
 # 10 buckets by hire date
 window_date = Window.orderBy("hire_date")
-employees.withColumn("decile", ntile(10).over(window_date)).show()
+df = employees.withColumn("decile", ntile(10).over(window_date))
+display(df.select("name", "hire_date", "decile"))
+
+# COMMAND ----------
 
 # Top quartile per department
 window_dept = Window.partitionBy("department").orderBy(col("salary").desc())
-employees.withColumn("dept_quartile", ntile(4).over(window_dept)) \
-    .filter(col("dept_quartile") == 1) \
-    .show()
+df = employees.withColumn("dept_quartile", ntile(4).over(window_dept)) \
+    .filter(col("dept_quartile") == 1)
+display(df)
 
+# COMMAND ----------
 
-# =============================================================================
-# Problem 10: Practical Scenarios
-# =============================================================================
+# MAGIC %md
+# MAGIC ## Problem 10: Practical Scenarios
+
+# COMMAND ----------
+
 # Scenario 1: Employees earning more than department average
 window_dept = Window.partitionBy("department")
-employees.withColumn("dept_avg", avg("salary").over(window_dept)) \
-    .filter(col("salary") > col("dept_avg")) \
-    .show()
+df = employees.withColumn("dept_avg", avg("salary").over(window_dept)) \
+    .filter(col("salary") > col("dept_avg"))
+display(df.select("name", "department", "salary", "dept_avg"))
+
+# COMMAND ----------
 
 # Scenario 2: Second highest salary per department
 window_dept_rank = Window.partitionBy("department").orderBy(col("salary").desc())
-employees.withColumn("rank", dense_rank().over(window_dept_rank)) \
-    .filter(col("rank") == 2) \
-    .show()
+df = employees.withColumn("rank", dense_rank().over(window_dept_rank)) \
+    .filter(col("rank") == 2)
+display(df)
 
+# COMMAND ----------
 
-# =============================================================================
-# Problem 12: Combining Window Functions
-# =============================================================================
+# MAGIC %md
+# MAGIC ## Problem 12: Combining Window Functions
+
+# COMMAND ----------
+
 window_dept_salary = Window.partitionBy("department").orderBy(col("salary").desc())
 window_dept_running = Window.partitionBy("department") \
     .orderBy("hire_date") \
@@ -178,4 +246,4 @@ result = employees.select(
     avg("salary").over(window_dept_full).alias("dept_avg"),
     (col("salary") - avg("salary").over(window_dept_full)).alias("diff_from_avg")
 )
-result.show()
+display(result)

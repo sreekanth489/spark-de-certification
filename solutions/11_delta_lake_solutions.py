@@ -1,29 +1,36 @@
-"""
-Delta Lake - Solutions
-=======================
-"""
+# Databricks notebook source
+# MAGIC %md
+# MAGIC # Delta Lake - Solutions
+# MAGIC Topics: ACID transactions, time travel, MERGE, optimization, CDC
 
-from pyspark.sql import SparkSession
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Setup
+
+# COMMAND ----------
+
 from pyspark.sql.functions import col, lit, current_timestamp, expr, when
-from pyspark.sql.types import StructType, StructField, StringType, IntegerType, DoubleType, TimestampType
 from delta.tables import DeltaTable
 
-# Initialize Spark with Delta
-spark = SparkSession.builder \
-    .appName("Delta Lake Solutions") \
-    .config("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension") \
-    .config("spark.sql.catalog.spark_catalog", "org.apache.spark.sql.delta.catalog.DeltaCatalog") \
-    .config("spark.databricks.delta.schema.autoMerge.enabled", "true") \
-    .getOrCreate()
+# COMMAND ----------
 
-# Sample data
-employees = spark.read.csv("../datasets/csv/employees.csv", header=True, inferSchema=True)
+# Load sample data
+employees = spark.read.csv("datasets/csv/employees.csv", header=True, inferSchema=True)
+display(employees)
 
-# =============================================================================
-# Problem 1: Creating Delta Tables
-# =============================================================================
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Problem 1: Creating Delta Tables
+
+# COMMAND ----------
+
 # a) Create from DataFrame
-employees.write.format("delta").mode("overwrite").save("../datasets/delta/employees")
+employees.write.format("delta").mode("overwrite").save("/tmp/delta/employees")
+print("Delta table created!")
+
+# COMMAND ----------
 
 # b) Create using SQL
 spark.sql("""
@@ -37,72 +44,74 @@ spark.sql("""
         city STRING
     )
     USING DELTA
-    LOCATION '../datasets/delta/employees_sql'
+    LOCATION '/tmp/delta/employees_sql'
 """)
+
+# COMMAND ----------
 
 # c) Convert Parquet to Delta
-# Write parquet first
-employees.write.format("parquet").mode("overwrite").save("../datasets/parquet/emp_to_convert")
+employees.write.format("parquet").mode("overwrite").save("/tmp/parquet/emp_to_convert")
 
-# Convert
-from delta.tables import DeltaTable
-DeltaTable.convertToDelta(spark, "parquet.`../datasets/parquet/emp_to_convert`")
+# Convert to Delta
+DeltaTable.convertToDelta(spark, "parquet.`/tmp/parquet/emp_to_convert`")
+print("Converted Parquet to Delta!")
 
-# d) Managed vs External
-# Managed (in warehouse)
-spark.sql("CREATE TABLE managed_emp USING DELTA AS SELECT * FROM delta_employees")
+# COMMAND ----------
 
-# External (user-specified location)
-spark.sql("""
-    CREATE TABLE external_emp
-    USING DELTA
-    LOCATION '../datasets/delta/external_emp'
-    AS SELECT * FROM delta_employees
-""")
+# MAGIC %md
+# MAGIC ## Problem 2: Basic CRUD Operations
 
+# COMMAND ----------
 
-# =============================================================================
-# Problem 2: Basic CRUD Operations
-# =============================================================================
-# a) INSERT
-spark.sql("INSERT INTO delta_employees VALUES (100, 'New Person', 'IT', 70000, '2024-01-01', NULL, 'Boston')")
+# a) INSERT using DataFrame
+new_data = spark.createDataFrame(
+    [(101, "New Person", "IT", 75000.0, "2024-01-01", None, "Boston")],
+    ["emp_id", "name", "department", "salary", "hire_date", "manager_id", "city"]
+)
+new_data.write.format("delta").mode("append").save("/tmp/delta/employees")
+print("Data inserted!")
 
-# Or using DataFrame
-new_data = spark.createDataFrame([(101, "Another Person", "IT", 75000)], ["emp_id", "name", "department", "salary"])
-new_data.write.format("delta").mode("append").save("../datasets/delta/employees")
+# COMMAND ----------
 
-# b) UPDATE
-delta_table = DeltaTable.forPath(spark, "../datasets/delta/employees")
+# b) UPDATE using DeltaTable API
+delta_table = DeltaTable.forPath(spark, "/tmp/delta/employees")
 delta_table.update(
     condition="department = 'IT'",
     set={"salary": "salary * 1.10"}
 )
+print("Update complete!")
 
-# SQL version
-spark.sql("UPDATE delta_employees SET salary = salary * 1.10 WHERE department = 'IT'")
+# COMMAND ----------
 
 # c) DELETE
-delta_table.delete(condition="emp_id = 100")
+delta_table.delete(condition="emp_id = 101")
+print("Delete complete!")
 
-# SQL version
-spark.sql("DELETE FROM delta_employees WHERE emp_id = 100")
+# COMMAND ----------
 
-# d) READ
-df = spark.read.format("delta").load("../datasets/delta/employees")
-df.show()
+# d) READ Delta table
+df = spark.read.format("delta").load("/tmp/delta/employees")
+display(df)
 
+# COMMAND ----------
 
-# =============================================================================
-# Problem 3: MERGE (Upsert) Operations
-# =============================================================================
+# MAGIC %md
+# MAGIC ## Problem 3: MERGE (Upsert) Operations
+
+# COMMAND ----------
+
 # Create source data (updates)
 updates = spark.createDataFrame([
-    (1, "John Smith Updated", "Engineering", 90000, "2020-01-15", 5, "New York"),
-    (200, "Brand New Employee", "Marketing", 65000, "2024-01-15", 11, "Boston")
+    (1, "John Smith Updated", "Engineering", 90000.0, "2020-01-15", 5, "New York"),
+    (200, "Brand New Employee", "Marketing", 65000.0, "2024-01-15", 11, "Boston")
 ], ["emp_id", "name", "department", "salary", "hire_date", "manager_id", "city"])
 
-# a) Basic MERGE
-delta_table = DeltaTable.forPath(spark, "../datasets/delta/employees")
+display(updates)
+
+# COMMAND ----------
+
+# a) Basic MERGE - Insert new, update existing
+delta_table = DeltaTable.forPath(spark, "/tmp/delta/employees")
 
 delta_table.alias("target").merge(
     updates.alias("source"),
@@ -111,432 +120,233 @@ delta_table.alias("target").merge(
     "name": "source.name",
     "department": "source.department",
     "salary": "source.salary"
-}).whenNotMatchedInsert(values={
-    "emp_id": "source.emp_id",
-    "name": "source.name",
-    "department": "source.department",
-    "salary": "source.salary",
-    "hire_date": "source.hire_date",
-    "manager_id": "source.manager_id",
-    "city": "source.city"
-}).execute()
+}).whenNotMatchedInsertAll().execute()
 
-# b) MERGE with delete
-delta_table.alias("target").merge(
-    updates.alias("source"),
-    "target.emp_id = source.emp_id"
-).whenMatchedDelete(
-    condition="source.salary = 0"
-).whenMatchedUpdate(set={
-    "salary": "source.salary"
-}).whenNotMatchedInsert(values={
-    "emp_id": "source.emp_id",
-    "name": "source.name",
-    "salary": "source.salary"
-}).execute()
+print("MERGE complete!")
 
-# c) SQL MERGE
-spark.sql("""
-    MERGE INTO delta_employees AS target
-    USING updates_view AS source
-    ON target.emp_id = source.emp_id
-    WHEN MATCHED AND source.is_delete = true THEN DELETE
-    WHEN MATCHED THEN UPDATE SET *
-    WHEN NOT MATCHED THEN INSERT *
-""")
+# COMMAND ----------
 
-# d) MERGE with source filter
-delta_table.alias("target").merge(
-    updates.filter(col("salary") > 0).alias("source"),
-    "target.emp_id = source.emp_id"
-).whenMatchedUpdateAll() \
-.whenNotMatchedInsertAll() \
-.execute()
+# Verify MERGE results
+display(spark.read.format("delta").load("/tmp/delta/employees"))
 
-# e) SCD Type 2
-# Close existing record and insert new
-spark.sql("""
-    MERGE INTO employees_scd2 AS target
-    USING (
-        SELECT *, current_timestamp() as effective_date
-        FROM updates
-    ) AS source
-    ON target.emp_id = source.emp_id AND target.is_current = true
-    WHEN MATCHED AND target.salary != source.salary THEN
-        UPDATE SET is_current = false, end_date = source.effective_date
-    WHEN NOT MATCHED THEN
-        INSERT (emp_id, name, salary, is_current, start_date)
-        VALUES (source.emp_id, source.name, source.salary, true, source.effective_date)
-""")
+# COMMAND ----------
 
+# MAGIC %md
+# MAGIC ## Problem 4: Time Travel
 
-# =============================================================================
-# Problem 4: Time Travel
-# =============================================================================
+# COMMAND ----------
+
 # a) Query by version number
-df_v0 = spark.read.format("delta").option("versionAsOf", 0).load("../datasets/delta/employees")
-df_v0.show()
+df_v0 = spark.read.format("delta").option("versionAsOf", 0).load("/tmp/delta/employees")
+display(df_v0)
 
-# b) Query by timestamp
-df_ts = spark.read.format("delta") \
-    .option("timestampAsOf", "2024-01-15 10:00:00") \
-    .load("../datasets/delta/employees")
+# COMMAND ----------
 
 # c) View history
-spark.sql("DESCRIBE HISTORY delta.`../datasets/delta/employees`").show(truncate=False)
+history_df = delta_table.history()
+display(history_df)
 
-# Or using DeltaTable
-delta_table = DeltaTable.forPath(spark, "../datasets/delta/employees")
-delta_table.history().show()
-delta_table.history(10).show()  # Last 10 versions
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC -- View history using SQL
+# MAGIC DESCRIBE HISTORY delta.`/tmp/delta/employees`
+
+# COMMAND ----------
 
 # d) Restore to previous version
 delta_table.restoreToVersion(0)
-# Or by timestamp
-# delta_table.restoreToTimestamp("2024-01-15 10:00:00")
+print("Restored to version 0!")
 
-# SQL version
-spark.sql("RESTORE delta.`../datasets/delta/employees` TO VERSION AS OF 0")
+# COMMAND ----------
 
-# e) Compare versions
-v0 = spark.read.format("delta").option("versionAsOf", 0).load("../datasets/delta/employees")
-v1 = spark.read.format("delta").option("versionAsOf", 1).load("../datasets/delta/employees")
+# MAGIC %md
+# MAGIC ## Problem 5: Schema Evolution
 
-# Find new records
-v1.exceptAll(v0).show()
+# COMMAND ----------
 
-
-# =============================================================================
-# Problem 5: Schema Evolution
-# =============================================================================
-# a) Add new columns (mergeSchema)
+# a) Add new columns with mergeSchema
 df_with_new_col = employees.withColumn("bonus", lit(1000.0))
+
 df_with_new_col.write.format("delta") \
     .mode("append") \
     .option("mergeSchema", "true") \
-    .save("../datasets/delta/employees")
+    .save("/tmp/delta/employees")
 
-# b) Schema enforcement (default - will fail if schema differs)
-# df.write.format("delta").mode("append").save(path)  # Fails if schema mismatch
+print("Schema evolved - new column added!")
 
-# Schema evolution
-spark.conf.set("spark.databricks.delta.schema.autoMerge.enabled", "true")
+# COMMAND ----------
 
-# c) Change column types (using overwriteSchema)
-# Only for compatible changes
-df.write.format("delta") \
-    .mode("overwrite") \
-    .option("overwriteSchema", "true") \
-    .save("../datasets/delta/employees")
+# Verify schema evolution
+spark.read.format("delta").load("/tmp/delta/employees").printSchema()
 
-# d) Rename columns
-spark.sql("ALTER TABLE delta_employees RENAME COLUMN name TO employee_name")
+# COMMAND ----------
 
-# e) Drop columns (Delta 2.0+)
-spark.sql("ALTER TABLE delta_employees DROP COLUMN bonus")
+# MAGIC %md
+# MAGIC ## Problem 6: Table Properties and Constraints
 
+# COMMAND ----------
 
-# =============================================================================
-# Problem 6: Table Properties and Constraints
-# =============================================================================
-# a) Set properties
-spark.sql("""
-    ALTER TABLE delta_employees
-    SET TBLPROPERTIES (
-        'delta.autoOptimize.optimizeWrite' = 'true',
-        'delta.autoOptimize.autoCompact' = 'true',
-        'description' = 'Employee master data'
-    )
-""")
+# MAGIC %sql
+# MAGIC -- Set table properties
+# MAGIC ALTER TABLE delta.`/tmp/delta/employees`
+# MAGIC SET TBLPROPERTIES (
+# MAGIC     'delta.autoOptimize.optimizeWrite' = 'true',
+# MAGIC     'delta.autoOptimize.autoCompact' = 'true'
+# MAGIC )
 
-# b) CHECK constraint
-spark.sql("""
-    ALTER TABLE delta_employees
-    ADD CONSTRAINT salary_positive CHECK (salary > 0)
-""")
+# COMMAND ----------
 
-# c) NOT NULL constraint
-spark.sql("""
-    ALTER TABLE delta_employees
-    ALTER COLUMN emp_id SET NOT NULL
-""")
+# MAGIC %sql
+# MAGIC -- View table details
+# MAGIC DESCRIBE DETAIL delta.`/tmp/delta/employees`
 
-# d) View details
-spark.sql("DESCRIBE DETAIL delta.`../datasets/delta/employees`").show(truncate=False)
-spark.sql("DESCRIBE EXTENDED delta_employees").show(truncate=False)
+# COMMAND ----------
 
+# MAGIC %md
+# MAGIC ## Problem 7: Optimization
 
-# =============================================================================
-# Problem 7: Optimization
-# =============================================================================
-# a) OPTIMIZE (compact files)
-spark.sql("OPTIMIZE delta.`../datasets/delta/employees`")
+# COMMAND ----------
 
-# b) OPTIMIZE with ZORDER
-spark.sql("OPTIMIZE delta.`../datasets/delta/employees` ZORDER BY (department, city)")
+# MAGIC %sql
+# MAGIC -- OPTIMIZE to compact small files
+# MAGIC OPTIMIZE delta.`/tmp/delta/employees`
 
-# Using DeltaTable API
-delta_table = DeltaTable.forPath(spark, "../datasets/delta/employees")
-delta_table.optimize().executeCompaction()
-delta_table.optimize().executeZOrderBy("department")
+# COMMAND ----------
 
-# c) Auto-compaction settings
-spark.sql("""
-    ALTER TABLE delta_employees SET TBLPROPERTIES (
-        'delta.autoOptimize.optimizeWrite' = 'true',
-        'delta.autoOptimize.autoCompact' = 'true'
-    )
-""")
+# MAGIC %sql
+# MAGIC -- OPTIMIZE with ZORDER
+# MAGIC OPTIMIZE delta.`/tmp/delta/employees` ZORDER BY (department, city)
 
-# d) VACUUM (remove old files)
-spark.sql("VACUUM delta.`../datasets/delta/employees` RETAIN 168 HOURS")
+# COMMAND ----------
 
-# Or with DeltaTable
-delta_table.vacuum(168)  # 168 hours = 7 days
+# MAGIC %sql
+# MAGIC -- VACUUM to remove old files (use with caution!)
+# MAGIC VACUUM delta.`/tmp/delta/employees` RETAIN 168 HOURS
 
-# e) Set retention
-spark.sql("""
-    ALTER TABLE delta_employees SET TBLPROPERTIES (
-        'delta.logRetentionDuration' = 'interval 30 days',
-        'delta.deletedFileRetentionDuration' = 'interval 7 days'
-    )
-""")
+# COMMAND ----------
 
+# MAGIC %md
+# MAGIC ## Problem 8: Partitioning
 
-# =============================================================================
-# Problem 8: Partitioning
-# =============================================================================
-# a) Create partitioned table
+# COMMAND ----------
+
+# Create partitioned Delta table
 employees.write.format("delta") \
     .mode("overwrite") \
     .partitionBy("department") \
-    .save("../datasets/delta/employees_partitioned")
+    .save("/tmp/delta/employees_partitioned")
 
-# b) Partition pruning
-df = spark.read.format("delta").load("../datasets/delta/employees_partitioned")
-df.filter(col("department") == "Engineering").explain()  # Should show partition filter
+print("Partitioned table created!")
 
-# c) Dynamic partition overwrite
-spark.conf.set("spark.sql.sources.partitionOverwriteMode", "dynamic")
-updates.write.format("delta") \
-    .mode("overwrite") \
-    .save("../datasets/delta/employees_partitioned")
+# COMMAND ----------
 
-# d) Generate manifests for other engines
-delta_table = DeltaTable.forPath(spark, "../datasets/delta/employees_partitioned")
-delta_table.generate("symlink_format_manifest")
+# Partition pruning - filter on partition column
+df = spark.read.format("delta").load("/tmp/delta/employees_partitioned") \
+    .filter(col("department") == "Engineering")
 
+# Check query plan for partition pruning
+df.explain()
 
-# =============================================================================
-# Problem 9: Change Data Feed (CDC)
-# =============================================================================
-# a) Enable CDF on existing table
-spark.sql("""
-    ALTER TABLE delta_employees SET TBLPROPERTIES (
-        'delta.enableChangeDataFeed' = 'true'
-    )
-""")
+# COMMAND ----------
 
-# Or when creating table
-spark.sql("""
-    CREATE TABLE cdf_enabled_table (id INT, value STRING)
-    USING DELTA
-    TBLPROPERTIES ('delta.enableChangeDataFeed' = 'true')
-""")
+# MAGIC %md
+# MAGIC ## Problem 9: Change Data Feed (CDC)
 
-# b) Read changes between versions
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC -- Enable Change Data Feed
+# MAGIC ALTER TABLE delta.`/tmp/delta/employees` SET TBLPROPERTIES (
+# MAGIC     'delta.enableChangeDataFeed' = 'true'
+# MAGIC )
+
+# COMMAND ----------
+
+# Make some changes to generate CDC data
+delta_table = DeltaTable.forPath(spark, "/tmp/delta/employees")
+delta_table.update(
+    condition="department = 'Engineering'",
+    set={"salary": "salary * 1.05"}
+)
+
+# COMMAND ----------
+
+# Read changes from CDF
 changes = spark.read.format("delta") \
     .option("readChangeFeed", "true") \
     .option("startingVersion", 0) \
-    .option("endingVersion", 5) \
-    .load("../datasets/delta/employees")
+    .load("/tmp/delta/employees")
 
-changes.show()  # Includes _change_type, _commit_version, _commit_timestamp
+display(changes)
 
-# c) Read changes between timestamps
-changes = spark.read.format("delta") \
-    .option("readChangeFeed", "true") \
-    .option("startingTimestamp", "2024-01-01") \
-    .option("endingTimestamp", "2024-01-15") \
-    .load("../datasets/delta/employees")
+# COMMAND ----------
 
-# d) Process CDC
-changes.filter(col("_change_type") == "insert").show()  # New records
-changes.filter(col("_change_type") == "update_postimage").show()  # Updated records
-changes.filter(col("_change_type") == "delete").show()  # Deleted records
+# Filter by change type
+display(changes.filter(col("_change_type") == "update_postimage"))
 
-# e) Streaming with CDF
-cdf_stream = spark.readStream.format("delta") \
-    .option("readChangeFeed", "true") \
-    .option("startingVersion", 0) \
-    .load("../datasets/delta/employees")
+# COMMAND ----------
 
+# MAGIC %md
+# MAGIC ## Problem 10: Delta Lake with Streaming
 
-# =============================================================================
-# Problem 10: Delta Lake with Streaming
-# =============================================================================
-# a) Write streaming to Delta
-# stream.writeStream \
-#     .format("delta") \
-#     .outputMode("append") \
-#     .option("checkpointLocation", "checkpoints/delta_stream") \
-#     .start("../datasets/delta/streaming_table")
+# COMMAND ----------
 
-# b) Read Delta as stream
-stream_df = spark.readStream.format("delta").load("../datasets/delta/employees")
+# Read Delta table as a stream
+stream_df = spark.readStream.format("delta").load("/tmp/delta/employees")
 
-# c) Delta as source and sink
-# spark.readStream.format("delta").load("source_path") \
-#     .writeStream.format("delta") \
-#     .option("checkpointLocation", "checkpoint") \
-#     .start("sink_path")
+# Write to console for demo (in production, write to another Delta table)
+# query = stream_df.writeStream.format("console").start()
 
-# d) Handle late data with MERGE
-# Use foreachBatch for complex upsert logic
-def upsert_to_delta(batch_df, batch_id):
-    delta_table = DeltaTable.forPath(spark, "path")
-    delta_table.alias("t").merge(
-        batch_df.alias("s"),
-        "t.id = s.id"
-    ).whenMatchedUpdateAll() \
-    .whenNotMatchedInsertAll() \
-    .execute()
+print("Streaming setup ready!")
 
-# stream.writeStream.foreachBatch(upsert_to_delta).start()
+# COMMAND ----------
 
+# MAGIC %md
+# MAGIC ## Problem 15: Complete Pipeline Example
 
-# =============================================================================
-# Problem 11: Liquid Clustering (Delta 3.0+)
-# =============================================================================
-# a) Create with liquid clustering
-spark.sql("""
-    CREATE TABLE liquid_clustered (
-        id INT,
-        date DATE,
-        category STRING,
-        value DOUBLE
-    )
-    USING DELTA
-    CLUSTER BY (date, category)
-""")
+# COMMAND ----------
 
-# b) Clustering vs others:
-# - Partitioning: Physical separation, good for low-cardinality
-# - Z-ordering: Within partitions, must run OPTIMIZE
-# - Liquid clustering: Automatic, incremental, high-cardinality friendly
+# MAGIC %sql
+# MAGIC -- Create fact table with all best practices
+# MAGIC CREATE TABLE IF NOT EXISTS sales_facts (
+# MAGIC     transaction_id STRING,
+# MAGIC     product_id STRING,
+# MAGIC     customer_id STRING,
+# MAGIC     quantity INT,
+# MAGIC     amount DOUBLE,
+# MAGIC     transaction_date DATE,
+# MAGIC     processed_time TIMESTAMP
+# MAGIC )
+# MAGIC USING DELTA
+# MAGIC PARTITIONED BY (transaction_date)
+# MAGIC TBLPROPERTIES (
+# MAGIC     'delta.enableChangeDataFeed' = 'true',
+# MAGIC     'delta.autoOptimize.optimizeWrite' = 'true'
+# MAGIC )
+# MAGIC LOCATION '/tmp/delta/sales_facts'
 
-# c) Alter clustering columns
-spark.sql("ALTER TABLE liquid_clustered CLUSTER BY (date)")
+# COMMAND ----------
 
-
-# =============================================================================
-# Problem 12: Deletion Vectors (Delta 2.4+)
-# =============================================================================
-# a) Enable deletion vectors
-spark.sql("""
-    ALTER TABLE delta_employees SET TBLPROPERTIES (
-        'delta.enableDeletionVectors' = 'true'
-    )
-""")
-
-# b) Deletion vectors impact:
-# - DELETE/UPDATE don't rewrite files immediately
-# - Mark rows as deleted in separate file
-# - Faster DELETE/UPDATE operations
-
-# c) Purge deletion vectors
-spark.sql("OPTIMIZE delta_employees")  # Rewrites and removes DVs
-
-
-# =============================================================================
-# Problem 13: UniForm
-# =============================================================================
-# a) Enable UniForm
-spark.sql("""
-    ALTER TABLE delta_employees SET TBLPROPERTIES (
-        'delta.universalFormat.enabledFormats' = 'iceberg'
-    )
-""")
-
-# Or at creation
-spark.sql("""
-    CREATE TABLE uniform_table (id INT, value STRING)
-    USING DELTA
-    TBLPROPERTIES ('delta.universalFormat.enabledFormats' = 'iceberg')
-""")
-
-# b) Query from Iceberg
-# Other tools can read the table using Iceberg metadata
-
-
-# =============================================================================
-# Problem 14: Performance Tuning
-# =============================================================================
-# a) Analyze statistics
-spark.sql("ANALYZE TABLE delta_employees COMPUTE STATISTICS")
-spark.sql("ANALYZE TABLE delta_employees COMPUTE STATISTICS FOR ALL COLUMNS")
-
-# b) Configure file sizes
-spark.conf.set("spark.databricks.delta.optimize.maxFileSize", 134217728)  # 128MB
-
-# c) Handle small files
-spark.sql("OPTIMIZE delta.`../datasets/delta/employees`")
-
-# d) Join optimization
-# Ensure both tables are optimized with ZORDER on join keys
-spark.sql("OPTIMIZE table1 ZORDER BY (join_key)")
-spark.sql("OPTIMIZE table2 ZORDER BY (join_key)")
-
-
-# =============================================================================
-# Problem 15: Complete Pipeline
-# =============================================================================
-# 1. Create table with partitioning
-spark.sql("""
-    CREATE TABLE IF NOT EXISTS sales_facts (
-        transaction_id STRING,
-        product_id STRING,
-        customer_id STRING,
-        quantity INT,
-        amount DOUBLE,
-        transaction_date DATE,
-        processed_time TIMESTAMP
-    )
-    USING DELTA
-    PARTITIONED BY (transaction_date)
-    TBLPROPERTIES (
-        'delta.enableChangeDataFeed' = 'true',
-        'delta.autoOptimize.optimizeWrite' = 'true'
-    )
-    LOCATION '../datasets/delta/sales_facts'
-""")
-
-# 2. Incremental load with MERGE
-def incremental_load(batch_df, batch_id):
-    DeltaTable.forPath(spark, "../datasets/delta/sales_facts") \
+# Incremental load function using MERGE
+def incremental_load(source_df):
+    DeltaTable.forPath(spark, "/tmp/delta/sales_facts") \
         .alias("target") \
         .merge(
-            batch_df.withColumn("processed_time", current_timestamp()).alias("source"),
+            source_df.withColumn("processed_time", current_timestamp()).alias("source"),
             "target.transaction_id = source.transaction_id"
         ) \
         .whenMatchedUpdateAll() \
         .whenNotMatchedInsertAll() \
         .execute()
 
-# 3. Read CDC for downstream
-changes = spark.read.format("delta") \
-    .option("readChangeFeed", "true") \
-    .option("startingVersion", 0) \
-    .load("../datasets/delta/sales_facts")
+print("Incremental load function defined!")
 
-# 4. Optimization schedule (run periodically)
-spark.sql("OPTIMIZE sales_facts ZORDER BY (product_id, customer_id)")
+# COMMAND ----------
 
-# 5. Retention policy
-spark.sql("""
-    ALTER TABLE sales_facts SET TBLPROPERTIES (
-        'delta.logRetentionDuration' = 'interval 30 days',
-        'delta.deletedFileRetentionDuration' = 'interval 7 days'
-    )
-""")
-spark.sql("VACUUM sales_facts RETAIN 168 HOURS")
+# MAGIC %sql
+# MAGIC -- Set retention policy
+# MAGIC ALTER TABLE sales_facts SET TBLPROPERTIES (
+# MAGIC     'delta.logRetentionDuration' = 'interval 30 days',
+# MAGIC     'delta.deletedFileRetentionDuration' = 'interval 7 days'
+# MAGIC )

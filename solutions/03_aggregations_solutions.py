@@ -1,26 +1,39 @@
-"""
-Aggregations - Solutions
-=========================
-"""
+# Databricks notebook source
+# MAGIC %md
+# MAGIC # Aggregations - Solutions
+# MAGIC Topics: groupBy, agg, count, sum, avg, min, max, collect_list, pivot
 
-from pyspark.sql import SparkSession
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Setup
+
+# COMMAND ----------
+
 from pyspark.sql.functions import (
-    col, count, sum, avg, min, max, first, last,
-    collect_list, collect_set, countDistinct, approx_count_distinct,
-    stddev, variance, expr, round, lit
+    col, count, sum, avg, min, max, first, last, round,
+    collect_list, collect_set, countDistinct, stddev, variance, expr, lit
 )
 
-spark = SparkSession.builder.appName("Aggregations Solutions").getOrCreate()
+# COMMAND ----------
 
-employees = spark.read.csv("../datasets/csv/employees.csv", header=True, inferSchema=True)
-sales = spark.read.csv("../datasets/csv/sales.csv", header=True, inferSchema=True)
-products = spark.read.csv("../datasets/csv/products.csv", header=True, inferSchema=True)
+employees = spark.read.csv("datasets/csv/employees.csv", header=True, inferSchema=True)
+sales = spark.read.csv("datasets/csv/sales.csv", header=True, inferSchema=True)
+products = spark.read.csv("datasets/csv/products.csv", header=True, inferSchema=True)
 
-# =============================================================================
-# Problem 1: Basic Aggregations
-# =============================================================================
+display(employees)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Problem 1: Basic Aggregations
+
+# COMMAND ----------
+
 # a) Count total employees
 print(f"Total employees: {employees.count()}")
+
+# COMMAND ----------
 
 # b) Min, max, avg salary
 employees.select(
@@ -29,194 +42,207 @@ employees.select(
     round(avg("salary"), 2).alias("avg_salary")
 ).show()
 
+# COMMAND ----------
+
 # c) Total salary per department
-employees.groupBy("department").agg(
+display(employees.groupBy("department").agg(
     sum("salary").alias("total_salary")
-).show()
+))
+
+# COMMAND ----------
 
 # d) Count employees per city
-employees.groupBy("city").agg(
+display(employees.groupBy("city").agg(
     count("*").alias("employee_count")
-).orderBy(col("employee_count").desc()).show()
+).orderBy(col("employee_count").desc()))
 
+# COMMAND ----------
 
-# =============================================================================
-# Problem 2: groupBy with Multiple Aggregations
-# =============================================================================
-employees.groupBy("department").agg(
+# MAGIC %md
+# MAGIC ## Problem 2: groupBy with Multiple Aggregations
+
+# COMMAND ----------
+
+display(employees.groupBy("department").agg(
     count("*").alias("employee_count"),
     round(avg("salary"), 2).alias("avg_salary"),
     max("salary").alias("max_salary"),
     min("hire_date").alias("earliest_hire")
-).show()
+))
 
+# COMMAND ----------
 
-# =============================================================================
-# Problem 3: Multiple Grouping Columns
-# =============================================================================
+# MAGIC %md
+# MAGIC ## Problem 3: Multiple Grouping Columns
+
+# COMMAND ----------
+
 # a) Group by department AND city
-employees.groupBy("department", "city").agg(
+display(employees.groupBy("department", "city").agg(
     count("*").alias("count")
-).show()
+))
+
+# COMMAND ----------
 
 # b) Average salary by department and city
 dept_city_avg = employees.groupBy("department", "city").agg(
     round(avg("salary"), 2).alias("avg_salary")
 )
-dept_city_avg.show()
+display(dept_city_avg)
+
+# COMMAND ----------
 
 # c) Highest average salary combination
-dept_city_avg.orderBy(col("avg_salary").desc()).limit(1).show()
+display(dept_city_avg.orderBy(col("avg_salary").desc()).limit(1))
 
+# COMMAND ----------
 
-# =============================================================================
-# Problem 4: Collect Functions
-# =============================================================================
+# MAGIC %md
+# MAGIC ## Problem 4: Collect Functions
+
+# COMMAND ----------
+
 # a) Collect names per department
-employees.groupBy("department").agg(
+display(employees.groupBy("department").agg(
     collect_list("name").alias("employee_names")
-).show(truncate=False)
+))
+
+# COMMAND ----------
 
 # b) Unique cities per department
-employees.groupBy("department").agg(
+display(employees.groupBy("department").agg(
     collect_set("city").alias("unique_cities")
-).show(truncate=False)
+))
 
-# c) First and last employee names (alphabetically)
-from pyspark.sql.functions import sort_array
+# COMMAND ----------
 
-employees.groupBy("department").agg(
-    first("name").alias("first_name"),
-    last("name").alias("last_name"),
-    sort_array(collect_list("name")).alias("sorted_names")
-).show(truncate=False)
+# MAGIC %md
+# MAGIC ## Problem 5: Sales Aggregations
 
+# COMMAND ----------
 
-# =============================================================================
-# Problem 5: Sales Aggregations
-# =============================================================================
 sales_with_revenue = sales.withColumn("revenue", col("quantity") * col("unit_price"))
 
 # a) Total revenue per product
-sales_with_revenue.groupBy("product_id").agg(
+display(sales_with_revenue.groupBy("product_id").agg(
     round(sum("revenue"), 2).alias("total_revenue")
-).orderBy(col("total_revenue").desc()).show()
+).orderBy(col("total_revenue").desc()))
+
+# COMMAND ----------
 
 # b) Best selling product by quantity
-sales.groupBy("product_id").agg(
+display(sales.groupBy("product_id").agg(
     sum("quantity").alias("total_quantity")
-).orderBy(col("total_quantity").desc()).limit(1).show()
+).orderBy(col("total_quantity").desc()).limit(1))
+
+# COMMAND ----------
 
 # c) Average transaction value per payment method
-sales_with_revenue.groupBy("payment_method").agg(
+display(sales_with_revenue.groupBy("payment_method").agg(
     round(avg("revenue"), 2).alias("avg_transaction_value")
-).show()
+))
+
+# COMMAND ----------
 
 # d) Transactions per store per day
-sales.groupBy("store_id", "transaction_date").agg(
+display(sales.groupBy("store_id", "transaction_date").agg(
     count("*").alias("transaction_count")
-).orderBy("store_id", "transaction_date").show()
+).orderBy("store_id", "transaction_date"))
 
+# COMMAND ----------
 
-# =============================================================================
-# Problem 6: Statistical Functions
-# =============================================================================
+# MAGIC %md
+# MAGIC ## Problem 6: Statistical Functions
+
+# COMMAND ----------
+
 # a) Standard deviation of salaries
 employees.select(
     round(stddev("salary"), 2).alias("salary_stddev")
 ).show()
 
+# COMMAND ----------
+
 # b) Variance per department
-employees.groupBy("department").agg(
+display(employees.groupBy("department").agg(
     round(variance("salary"), 2).alias("salary_variance")
-).show()
+))
 
-# c) Correlation (simulated - between salary and emp_id as proxy for tenure)
-employees.select(
-    expr("corr(salary, emp_id)").alias("salary_tenure_corr")
-).show()
+# COMMAND ----------
 
-# d) Percentiles using percentile_approx
+# d) Percentiles
 employees.select(
     expr("percentile_approx(salary, 0.25)").alias("p25"),
     expr("percentile_approx(salary, 0.50)").alias("p50_median"),
     expr("percentile_approx(salary, 0.75)").alias("p75")
 ).show()
 
+# COMMAND ----------
 
-# =============================================================================
-# Problem 7: Pivot Tables
-# =============================================================================
+# MAGIC %md
+# MAGIC ## Problem 7: Pivot Tables
+
+# COMMAND ----------
+
 # a) Pivot: rows=department, columns=city, values=count
 pivot_dept_city = employees.groupBy("department").pivot("city").count()
-pivot_dept_city.show()
+display(pivot_dept_city)
+
+# COMMAND ----------
 
 # b) Pivot sales: rows=store_id, columns=payment_method, values=sum of revenue
 sales_with_revenue = sales.withColumn("revenue", col("quantity") * col("unit_price"))
 pivot_sales = sales_with_revenue.groupBy("store_id").pivot("payment_method").agg(
     round(sum("revenue"), 2)
 )
-pivot_sales.show()
+display(pivot_sales)
 
-# c) Pivot with multiple aggregations
-employees.groupBy("department").pivot("city").agg(
-    count("*").alias("count"),
-    round(avg("salary"), 0).alias("avg_sal")
-).show()
+# COMMAND ----------
 
+# MAGIC %md
+# MAGIC ## Problem 8: Rollup and Cube
 
-# =============================================================================
-# Problem 8: Rollup and Cube
-# =============================================================================
+# COMMAND ----------
+
 # a) Rollup - hierarchical subtotals
-employees.rollup("department", "city").agg(
+display(employees.rollup("department", "city").agg(
     count("*").alias("count"),
     sum("salary").alias("total_salary")
-).orderBy("department", "city").show()
+).orderBy("department", "city"))
+
+# COMMAND ----------
 
 # b) Cube - all combinations
-employees.cube("department", "city").agg(
+display(employees.cube("department", "city").agg(
     count("*").alias("count")
-).orderBy("department", "city").show()
+).orderBy("department", "city"))
 
-# c) Identify subtotals using grouping()
-from pyspark.sql.functions import grouping, grouping_id
+# COMMAND ----------
 
-employees.cube("department", "city").agg(
-    count("*").alias("count"),
-    grouping("department").alias("dept_subtotal"),
-    grouping("city").alias("city_subtotal"),
-    grouping_id("department", "city").alias("grouping_id")
-).orderBy("department", "city").show()
+# MAGIC %md
+# MAGIC ## Problem 9: Having Clause Equivalent
 
+# COMMAND ----------
 
-# =============================================================================
-# Problem 9: Having Clause Equivalent
-# =============================================================================
 # a) Departments with more than 2 employees
-employees.groupBy("department").agg(
+display(employees.groupBy("department").agg(
     count("*").alias("emp_count")
-).filter(col("emp_count") > 2).show()
+).filter(col("emp_count") > 2))
+
+# COMMAND ----------
 
 # b) Departments with avg salary > 80000
-employees.groupBy("department").agg(
+display(employees.groupBy("department").agg(
     avg("salary").alias("avg_salary")
-).filter(col("avg_salary") > 80000).show()
+).filter(col("avg_salary") > 80000))
 
-# c) Products sold more than 5 times
-sales.groupBy("product_id").agg(
-    count("*").alias("sale_count")
-).filter(col("sale_count") > 5).show()
+# COMMAND ----------
 
-# d) Cities with total salary expense > 200000
-employees.groupBy("city").agg(
-    sum("salary").alias("total_salary")
-).filter(col("total_salary") > 200000).show()
+# MAGIC %md
+# MAGIC ## Problem 10: Complex Aggregation Scenario
 
+# COMMAND ----------
 
-# =============================================================================
-# Problem 10: Complex Aggregation Scenario
-# =============================================================================
 dept_summary = employees.groupBy("department").agg(
     count("*").alias("total_employees"),
     sum("salary").alias("total_salary_expense"),
@@ -230,4 +256,4 @@ dept_summary = employees.groupBy("department").agg(
     col("total_salary_expense").desc()
 )
 
-dept_summary.show(truncate=False)
+display(dept_summary)
