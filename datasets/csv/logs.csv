@@ -1,0 +1,19 @@
+timestamp,level,service,message,trace_id,duration_ms
+2024-01-15 10:00:01,INFO,api-gateway,Request received,trace-001,5
+2024-01-15 10:00:02,INFO,user-service,Authenticating user,trace-001,120
+2024-01-15 10:00:03,DEBUG,user-service,Token validated,trace-001,15
+2024-01-15 10:00:04,INFO,order-service,Creating order,trace-001,250
+2024-01-15 10:00:05,ERROR,payment-service,Payment failed: insufficient funds,trace-001,180
+2024-01-15 10:00:06,WARN,order-service,Order creation failed,trace-001,10
+2024-01-15 10:00:07,INFO,api-gateway,Response sent,trace-001,5
+2024-01-15 10:01:01,INFO,api-gateway,Request received,trace-002,4
+2024-01-15 10:01:02,INFO,user-service,Authenticating user,trace-002,95
+2024-01-15 10:01:03,INFO,product-service,Fetching product details,trace-002,45
+2024-01-15 10:01:04,INFO,api-gateway,Response sent,trace-002,3
+2024-01-15 10:02:01,INFO,api-gateway,Request received,trace-003,6
+2024-01-15 10:02:02,ERROR,user-service,Authentication failed: invalid token,trace-003,25
+2024-01-15 10:02:03,INFO,api-gateway,Response sent,trace-003,4
+2024-01-15 10:03:01,INFO,api-gateway,Request received,trace-004,5
+2024-01-15 10:03:02,INFO,user-service,Authenticating user,trace-004,88
+2024-01-15 10:03:03,INFO,order-service,Fetching order history,trace-004,320
+2024-01-15 10:03:04,INFO,api-gateway,Response sent,trace-004,4

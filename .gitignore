@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+.venv/
+env/
+.env
+
+# Spark
+*.log
+metastore_db/
+spark-warehouse/
+derby.log
+
+# Output directories
+output/
+checkpoints/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Parquet/Delta generated files
+datasets/parquet/*
+datasets/delta/*
+!datasets/parquet/.gitkeep
+!datasets/delta/.gitkeep

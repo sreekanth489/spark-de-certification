@@ -1,0 +1,11 @@
+product_id,product_name,category,brand,cost_price,list_price,stock_quantity
+P001,Wireless Mouse,Electronics,TechBrand,15.00,29.99,500
+P002,Bluetooth Headphones,Electronics,SoundMax,75.00,149.99,200
+P003,Laptop Stand,Office,ErgoDesk,200.00,499.99,100
+P004,USB Cable,Electronics,TechBrand,3.00,9.99,1000
+P005,Desk Lamp,Office,BrightLight,35.00,79.99,300
+P006,Keyboard,Electronics,TechBrand,25.00,59.99,400
+P007,Monitor Arm,Office,ErgoDesk,80.00,179.99,150
+P008,Webcam,Electronics,SoundMax,40.00,89.99,250
+P009,Notebook Set,Office,PaperCo,5.00,14.99,800
+P010,Phone Charger,Electronics,TechBrand,8.00,19.99,600

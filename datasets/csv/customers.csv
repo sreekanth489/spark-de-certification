@@ -1,0 +1,13 @@
+customer_id,first_name,last_name,email,phone,city,state,country,registration_date
+C101,Michael,Scott,michael.scott@email.com,555-0101,Scranton,PA,USA,2023-01-15
+C102,Dwight,Schrute,dwight.schrute@email.com,555-0102,Scranton,PA,USA,2023-02-20
+C103,Jim,Halpert,jim.halpert@email.com,555-0103,Philadelphia,PA,USA,2023-03-10
+C104,Pam,Beesly,pam.beesly@email.com,555-0104,Scranton,PA,USA,2023-04-05
+C105,Andy,Bernard,andy.bernard@email.com,555-0105,Stamford,CT,USA,2023-05-12
+C106,Angela,Martin,angela.martin@email.com,555-0106,Scranton,PA,USA,2023-06-18
+C107,Kevin,Malone,kevin.malone@email.com,555-0107,Scranton,PA,USA,2023-07-22
+C108,Oscar,Martinez,oscar.martinez@email.com,555-0108,Los Angeles,CA,USA,2023-08-30
+C109,Stanley,Hudson,stanley.hudson@email.com,555-0109,Scranton,PA,USA,2023-09-14
+C110,Phyllis,Vance,phyllis.vance@email.com,555-0110,Scranton,PA,USA,2023-10-25
+C111,Ryan,Howard,ryan.howard@email.com,555-0111,New York,NY,USA,2023-11-08
+C112,Kelly,Kapoor,kelly.kapoor@email.com,555-0112,Scranton,PA,USA,2023-12-01

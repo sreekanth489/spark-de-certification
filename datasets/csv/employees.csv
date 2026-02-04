@@ -1,0 +1,13 @@
+emp_id,name,department,salary,hire_date,manager_id,city
+1,John Smith,Engineering,85000,2020-01-15,5,New York
+2,Jane Doe,Engineering,92000,2019-03-22,5,San Francisco
+3,Bob Johnson,Sales,75000,2021-06-01,6,Chicago
+4,Alice Williams,Sales,78000,2020-11-10,6,Chicago
+5,Charlie Brown,Engineering,120000,2018-02-28,,New York
+6,Diana Ross,Sales,110000,2017-09-15,,San Francisco
+7,Eve Martinez,HR,65000,2022-01-20,8,New York
+8,Frank Wilson,HR,95000,2019-07-01,,Chicago
+9,Grace Lee,Engineering,88000,2021-03-15,5,San Francisco
+10,Henry Taylor,Marketing,72000,2020-08-22,11,New York
+11,Ivy Chen,Marketing,105000,2018-11-30,,San Francisco
+12,Jack Davis,Engineering,95000,2019-12-01,5,Chicago
