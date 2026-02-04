@@ -1,273 +1,236 @@
-"""
-Performance Tuning - Solutions
-===============================
-"""
+# Databricks notebook source
+# MAGIC %md
+# MAGIC # Performance Tuning - Solutions
+# MAGIC Topics: Caching, partitioning, shuffle, broadcast, explain plans, optimization
 
-from pyspark.sql import SparkSession
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Setup
+
+# COMMAND ----------
+
 from pyspark.sql.functions import col, broadcast, spark_partition_id, lit, rand
 from pyspark.storagelevel import StorageLevel
 
-spark = SparkSession.builder \
-    .appName("Performance Solutions") \
-    .config("spark.sql.adaptive.enabled", "true") \
-    .config("spark.sql.adaptive.coalescePartitions.enabled", "true") \
-    .getOrCreate()
+# COMMAND ----------
 
-employees = spark.read.csv("../datasets/csv/employees.csv", header=True, inferSchema=True)
-sales = spark.read.csv("../datasets/csv/sales.csv", header=True, inferSchema=True)
-products = spark.read.csv("../datasets/csv/products.csv", header=True, inferSchema=True)
+employees = spark.read.csv("datasets/csv/employees.csv", header=True, inferSchema=True)
+sales = spark.read.csv("datasets/csv/sales.csv", header=True, inferSchema=True)
+products = spark.read.csv("datasets/csv/products.csv", header=True, inferSchema=True)
 
-# =============================================================================
-# Problem 1: Understanding Explain Plans
-# =============================================================================
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Problem 1: Understanding Explain Plans
+
+# COMMAND ----------
+
 # a) Simple explain
 employees.filter(col("salary") > 80000).explain()
+
+# COMMAND ----------
 
 # b) Extended explain (shows parsed, analyzed, optimized, physical plans)
 employees.filter(col("salary") > 80000).explain(extended=True)
 
+# COMMAND ----------
+
 # c) Formatted explain (Spark 3.0+)
 employees.filter(col("salary") > 80000).explain(mode="formatted")
 
-# d) Cost-based explain
-employees.filter(col("salary") > 80000).explain(mode="cost")
+# COMMAND ----------
 
-# Key things to look for:
-# - Scan: FileScan, InMemoryTableScan
-# - Exchange: Shuffle operations
-# - BroadcastExchange: Broadcast join
-# - Sort, SortMergeJoin, BroadcastHashJoin
+# MAGIC %md
+# MAGIC ## Problem 2: Caching and Persistence
 
+# COMMAND ----------
 
-# =============================================================================
-# Problem 2: Caching and Persistence
-# =============================================================================
 # a) Cache DataFrame (MEMORY_AND_DISK by default)
 employees.cache()
 employees.count()  # Materialize cache
+print("DataFrame cached!")
+
+# COMMAND ----------
 
 # b) Persist with different storage levels
-employees.persist(StorageLevel.MEMORY_ONLY)
-employees.persist(StorageLevel.MEMORY_AND_DISK)
-employees.persist(StorageLevel.DISK_ONLY)
-employees.persist(StorageLevel.MEMORY_ONLY_SER)  # Serialized
-employees.persist(StorageLevel.MEMORY_AND_DISK_SER)
-
-# c) Unpersist
 employees.unpersist()
+
+# MEMORY_ONLY
+employees.persist(StorageLevel.MEMORY_ONLY)
+print(f"Storage level: MEMORY_ONLY")
+
+# COMMAND ----------
 
 # d) Check if cached
 print(f"Is cached: {employees.is_cached}")
 
-# e) When to cache:
-# - DataFrame used multiple times in same job
-# - After expensive transformations
-# - Iterative algorithms
+# COMMAND ----------
 
-# When NOT to cache:
-# - One-time use DataFrames
-# - Very large DataFrames that don't fit in memory
-# - When storage is the bottleneck
+# c) Unpersist
+employees.unpersist()
+print(f"After unpersist - Is cached: {employees.is_cached}")
 
+# COMMAND ----------
 
-# =============================================================================
-# Problem 3: Partitioning Strategies
-# =============================================================================
+# MAGIC %md
+# MAGIC ## Problem 3: Partitioning Strategies
+
+# COMMAND ----------
+
 # a) Check partitions
 print(f"Current partitions: {employees.rdd.getNumPartitions()}")
 
+# COMMAND ----------
+
 # Show partition distribution
-employees.withColumn("partition", spark_partition_id()).groupBy("partition").count().show()
+display(employees.withColumn("partition", spark_partition_id()).groupBy("partition").count())
+
+# COMMAND ----------
 
 # b) Repartition by number
 df_repart = employees.repartition(4)
 print(f"After repartition(4): {df_repart.rdd.getNumPartitions()}")
 
+# COMMAND ----------
+
 # c) Repartition by column (hash partitioning)
-df_by_dept = employees.repartition("department")
-df_by_dept = employees.repartition(4, "department")  # 4 partitions by department
+df_by_dept = employees.repartition(4, "department")
+print(f"Partitioned by department: {df_by_dept.rdd.getNumPartitions()}")
+
+# COMMAND ----------
 
 # d) Coalesce (reduce partitions without shuffle)
 df_coalesce = employees.coalesce(2)
 print(f"After coalesce(2): {df_coalesce.rdd.getNumPartitions()}")
 
-# e) When to use which:
-# - repartition: Need to increase partitions or distribute by key
-# - coalesce: Reduce partitions to avoid small files
+# COMMAND ----------
 
+# MAGIC %md
+# MAGIC ## Problem 4: Broadcast Joins
 
-# =============================================================================
-# Problem 4: Broadcast Joins
-# =============================================================================
+# COMMAND ----------
+
 # a) Broadcast hint
 sales_with_products = sales.join(
     broadcast(products),
     "product_id"
 )
+display(sales_with_products.select("transaction_id", "product_name", "quantity"))
 
-# b) Configure broadcast threshold (default 10MB)
-spark.conf.set("spark.sql.autoBroadcastJoinThreshold", 10 * 1024 * 1024)  # 10MB
+# COMMAND ----------
 
-# Disable auto broadcast
-spark.conf.set("spark.sql.autoBroadcastJoinThreshold", -1)
-
-# c) Verify broadcast in explain
+# c) Verify broadcast in explain plan
 sales_with_products.explain()
-# Look for: BroadcastHashJoin or BroadcastExchange
 
-# d) When NOT to use broadcast:
-# - Large tables (>100MB typically)
-# - When small table is actually large after filtering
-# - Memory constraints on executors
+# COMMAND ----------
 
+# b) Configure broadcast threshold
+print(f"Current threshold: {spark.conf.get('spark.sql.autoBroadcastJoinThreshold')}")
 
-# =============================================================================
-# Problem 5: Shuffle Optimization
-# =============================================================================
+# Set to 10MB
+spark.conf.set("spark.sql.autoBroadcastJoinThreshold", 10 * 1024 * 1024)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Problem 5: Shuffle Optimization
+
+# COMMAND ----------
+
 # a) Identify shuffle operations (Exchange in plan)
 sales.groupBy("store_id").count().explain()
 
-# b) Pre-partition to avoid shuffle
-# If joining same key multiple times, partition once
-sales_partitioned = sales.repartition("product_id")
-sales_partitioned.join(products, "product_id").explain()
+# COMMAND ----------
 
 # c) Configure shuffle partitions
-spark.conf.set("spark.sql.shuffle.partitions", 200)  # Default
-spark.conf.set("spark.sql.shuffle.partitions", 10)   # For small data
+print(f"Current shuffle partitions: {spark.conf.get('spark.sql.shuffle.partitions')}")
 
-# d) Bucketing (see Problem 11)
+# Set for small data
+spark.conf.set("spark.sql.shuffle.partitions", 10)
+print(f"New shuffle partitions: {spark.conf.get('spark.sql.shuffle.partitions')}")
 
+# COMMAND ----------
 
-# =============================================================================
-# Problem 6: Predicate Pushdown
-# =============================================================================
-# Parquet/ORC support predicate pushdown
-employees.write.mode("overwrite").parquet("../datasets/parquet/employees")
+# MAGIC %md
+# MAGIC ## Problem 6: Predicate Pushdown
+
+# COMMAND ----------
+
+# Write Parquet for pushdown demo
+employees.write.mode("overwrite").parquet("/tmp/employees_parquet")
+
+# COMMAND ----------
 
 # Read with filter - predicate pushed to scan
-df = spark.read.parquet("../datasets/parquet/employees") \
+df = spark.read.parquet("/tmp/employees_parquet") \
     .filter(col("salary") > 80000)
 
 # Verify in explain - filter should be at scan level
 df.explain()
 
-# Predicates that CAN be pushed:
-# - =, >, <, >=, <=, !=
-# - IN, IS NULL, IS NOT NULL
-# - AND, OR combinations
+# COMMAND ----------
 
-# Predicates that CANNOT be pushed:
-# - UDFs
-# - Complex expressions
-# - LIKE (depends on pattern)
+# MAGIC %md
+# MAGIC ## Problem 7: Column Pruning
 
+# COMMAND ----------
 
-# =============================================================================
-# Problem 7: Column Pruning
-# =============================================================================
-# a) Select only needed columns
-df = spark.read.parquet("../datasets/parquet/employees") \
-    .select("name", "salary")  # Only reads these columns
+# Select only needed columns
+df = spark.read.parquet("/tmp/employees_parquet") \
+    .select("name", "salary")
 
-# b) Verify in explain
+# Verify column pruning in explain
 df.explain()
-# Look for: ReadSchema with only selected columns
 
-# c) Impact comparison
-# Bad: Reading all columns
-df_all = spark.read.parquet("../datasets/parquet/employees")
-df_all.select("name").explain()
+# COMMAND ----------
 
-# Good: Column pruning
-df_pruned = spark.read.parquet("../datasets/parquet/employees").select("name")
-df_pruned.explain()
+# MAGIC %md
+# MAGIC ## Problem 8: Data Skew
 
+# COMMAND ----------
 
-# =============================================================================
-# Problem 8: Data Skew
-# =============================================================================
 # a) Identify skew - check partition sizes
-employees.withColumn("partition", spark_partition_id()) \
+display(employees.withColumn("partition", spark_partition_id()) \
     .groupBy("partition") \
     .count() \
-    .orderBy(col("count").desc()) \
-    .show()
+    .orderBy(col("count").desc()))
 
-# b) Salting technique for skewed joins
-from pyspark.sql.functions import concat, floor, rand
+# COMMAND ----------
 
-# Add salt to skewed key
-num_salts = 10
-salted_large = employees.withColumn(
-    "salted_key",
-    concat(col("department"), lit("_"), (rand() * num_salts).cast("int"))
-)
+# MAGIC %md
+# MAGIC ## Problem 9: Adaptive Query Execution (AQE)
 
-# Explode small table with all salts
-from pyspark.sql.functions import explode, array, lit
+# COMMAND ----------
 
-salts = spark.range(num_salts).withColumnRenamed("id", "salt")
-small_df = products  # Example small table
+# a) Enable AQE
+spark.conf.set("spark.sql.adaptive.enabled", "true")
+print(f"AQE enabled: {spark.conf.get('spark.sql.adaptive.enabled')}")
 
-# c) AQE skew join optimization (Spark 3.0+)
-spark.conf.set("spark.sql.adaptive.skewJoin.enabled", "true")
-spark.conf.set("spark.sql.adaptive.skewJoin.skewedPartitionFactor", 5)
-spark.conf.set("spark.sql.adaptive.skewJoin.skewedPartitionThresholdInBytes", "256MB")
-
-# d) Repartition to reduce skew
-employees.repartition(10, "department").explain()
-
-
-# =============================================================================
-# Problem 9: Adaptive Query Execution (AQE)
-# =============================================================================
-# a) Enable/disable AQE
-spark.conf.set("spark.sql.adaptive.enabled", "true")  # Enabled by default in Spark 3.0+
+# COMMAND ----------
 
 # b) Coalesce shuffle partitions
 spark.conf.set("spark.sql.adaptive.coalescePartitions.enabled", "true")
 spark.conf.set("spark.sql.adaptive.coalescePartitions.minPartitionSize", "64MB")
 
-# c) Convert sort-merge to broadcast
-spark.conf.set("spark.sql.adaptive.autoBroadcastJoinThreshold", "10MB")
+# COMMAND ----------
 
 # d) Skew join optimization
 spark.conf.set("spark.sql.adaptive.skewJoin.enabled", "true")
+spark.conf.set("spark.sql.adaptive.skewJoin.skewedPartitionFactor", "5")
+
+# COMMAND ----------
 
 # Check AQE in action
 sales.join(products, "product_id").explain(mode="formatted")
 
+# COMMAND ----------
 
-# =============================================================================
-# Problem 10: Memory Management
-# =============================================================================
-# a) Spark memory model
-# - Execution memory: Shuffles, joins, sorts, aggregations
-# - Storage memory: Caching, broadcast variables
-# - Unified memory management (Spark 1.6+)
+# MAGIC %md
+# MAGIC ## Problem 11: Bucketing
 
-# b) Configure executor memory
-# spark-submit --executor-memory 4g
-# Or: spark.executor.memory = 4g
+# COMMAND ----------
 
-# c) Handle OOM errors:
-# - Increase executor memory
-# - Reduce partition size (more partitions)
-# - Spill to disk (default behavior)
-# - Use memory-efficient operations
-# - Avoid collect() on large data
-
-# d) Memory-intensive operations:
-# - Broadcast joins with large tables
-# - collect_list() on large groups
-# - Caching large DataFrames
-# - Sorting large datasets
-
-
-# =============================================================================
-# Problem 11: Bucketing
-# =============================================================================
 # a) Create bucketed table
 employees.write \
     .mode("overwrite") \
@@ -275,99 +238,64 @@ employees.write \
     .sortBy("salary") \
     .saveAsTable("bucketed_employees")
 
-# b) Join bucketed tables (no shuffle if same bucket columns)
-# Both tables must be bucketed on join key with same number of buckets
-spark.sql("""
-    SELECT * FROM bucketed_employees e1
-    JOIN bucketed_employees e2 ON e1.department = e2.department
-""").explain()
+print("Bucketed table created!")
 
-# c) Query bucketed tables
-spark.sql("SELECT * FROM bucketed_employees WHERE department = 'Engineering'").explain()
+# COMMAND ----------
 
-# d) Bucket pruning
-# Spark can skip buckets that don't match filter condition
+# MAGIC %sql
+# MAGIC -- Query bucketed table
+# MAGIC SELECT * FROM bucketed_employees WHERE department = 'Engineering'
 
+# COMMAND ----------
 
-# =============================================================================
-# Problem 12: File-based Optimization
-# =============================================================================
-# a) Optimal file sizes: 128MB - 1GB
-# Check current file sizes and partition count
+# MAGIC %md
+# MAGIC ## Problem 12: File-based Optimization
+
+# COMMAND ----------
+
+# a) Check file sizes and partition count
+df = spark.read.parquet("/tmp/employees_parquet")
+print(f"Partitions: {df.rdd.getNumPartitions()}")
+
+# COMMAND ----------
 
 # b) Compact small files
-small_files_df = spark.read.parquet("../datasets/parquet/employees_partitioned")
-small_files_df.coalesce(1).write.mode("overwrite").parquet("../datasets/parquet/employees_compacted")
+df.coalesce(1).write.mode("overwrite").parquet("/tmp/employees_compacted")
+print("Files compacted!")
 
-# c) Partition pruning
-# Filter on partition column - only reads matching partitions
-spark.read.parquet("../datasets/parquet/employees_partitioned") \
-    .filter(col("department") == "Engineering") \
-    .explain()
+# COMMAND ----------
 
-# d) Z-ordering (Delta Lake)
-# Colocates related data for better data skipping
-# deltaTable.optimize().executeZOrderBy("column")
+# MAGIC %md
+# MAGIC ## Problem 13: Configuration Tuning
 
+# COMMAND ----------
 
-# =============================================================================
-# Problem 13: Configuration Tuning
-# =============================================================================
-# a) Key configurations
+# Key configurations
 configs = {
-    # Parallelism
-    "spark.sql.shuffle.partitions": 200,  # For shuffle operations
-    "spark.default.parallelism": 200,      # For RDD operations
-
-    # Broadcast
-    "spark.sql.autoBroadcastJoinThreshold": 10485760,  # 10MB
-
-    # AQE
-    "spark.sql.adaptive.enabled": True,
-    "spark.sql.adaptive.coalescePartitions.enabled": True,
-
-    # Memory
-    "spark.memory.fraction": 0.6,          # Fraction of heap for execution/storage
-    "spark.memory.storageFraction": 0.5,   # Fraction of memory.fraction for storage
-
-    # Compression
-    "spark.sql.parquet.compression.codec": "snappy",
+    "spark.sql.shuffle.partitions": spark.conf.get("spark.sql.shuffle.partitions"),
+    "spark.sql.autoBroadcastJoinThreshold": spark.conf.get("spark.sql.autoBroadcastJoinThreshold"),
+    "spark.sql.adaptive.enabled": spark.conf.get("spark.sql.adaptive.enabled"),
 }
 
-# Apply configurations
 for key, value in configs.items():
-    spark.conf.set(key, value)
+    print(f"{key}: {value}")
 
-# b-e) Access current config values
-print(f"shuffle.partitions: {spark.conf.get('spark.sql.shuffle.partitions')}")
-print(f"autoBroadcastJoinThreshold: {spark.conf.get('spark.sql.autoBroadcastJoinThreshold')}")
-print(f"adaptive.enabled: {spark.conf.get('spark.sql.adaptive.enabled')}")
+# COMMAND ----------
 
+# MAGIC %md
+# MAGIC ## Problem 14: Monitoring and Debugging
 
-# =============================================================================
-# Problem 14: Monitoring and Debugging
-# =============================================================================
-# a) Spark UI (http://localhost:4040)
-# - Jobs: Overall job progress
-# - Stages: Task-level details
-# - Storage: Cached RDDs/DataFrames
-# - Executors: Resource usage
-# - SQL: Query plans and metrics
+# COMMAND ----------
 
-# b) Stage timing analysis
-# Look for:
-# - Long-running stages
-# - Uneven task distribution
-# - High shuffle read/write
+# Get Spark UI URL
+print(f"Spark UI: {spark.sparkContext.uiWebUrl}")
 
-# c) Identify data skew in UI
-# - Tasks with much longer duration than others
-# - Task with much more input data than others
+# COMMAND ----------
 
-# d) Memory analysis
-# - Storage tab shows cached data
-# - Executor tab shows memory usage
-# - Look for spill metrics (memory to disk)
-
-# Programmatic metrics
-print(spark.sparkContext.uiWebUrl)
+# MAGIC %md
+# MAGIC ### Key things to look for in Spark UI:
+# MAGIC - **Jobs tab**: Overall job progress
+# MAGIC - **Stages tab**: Task-level details, identify slow stages
+# MAGIC - **Storage tab**: Cached RDDs/DataFrames
+# MAGIC - **Executors tab**: Resource usage per executor
+# MAGIC - **SQL tab**: Query plans and metrics
