@@ -1,95 +1,98 @@
-"""
-Advanced Spark Features - Solutions
-====================================
-"""
+# Databricks notebook source
+# MAGIC %md
+# MAGIC # Advanced Spark Features - Solutions
+# MAGIC Topics: AQE, DPP, Pandas API, SQL hints, higher-order functions, error handling
 
-from pyspark.sql import SparkSession
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Setup
+
+# COMMAND ----------
+
 from pyspark.sql.functions import (
     col, lit, expr, array, struct, transform, filter as array_filter,
     aggregate, exists, forall, zip_with, explode, current_timestamp
 )
 
-spark = SparkSession.builder \
-    .appName("Advanced Spark Solutions") \
-    .config("spark.sql.adaptive.enabled", "true") \
-    .config("spark.sql.ansi.enabled", "true") \
-    .getOrCreate()
+# COMMAND ----------
 
-employees = spark.read.csv("../datasets/csv/employees.csv", header=True, inferSchema=True)
-sales = spark.read.csv("../datasets/csv/sales.csv", header=True, inferSchema=True)
+employees = spark.read.csv("datasets/csv/employees.csv", header=True, inferSchema=True)
+sales = spark.read.csv("datasets/csv/sales.csv", header=True, inferSchema=True)
 
-# =============================================================================
-# Problem 1: Spark Connect (Spark 3.4+)
-# =============================================================================
-# a) Connect to remote cluster
-# from pyspark.sql import SparkSession
-# spark = SparkSession.builder.remote("sc://host:port").getOrCreate()
+display(employees)
 
-# b) Execute queries - same API as local
-# df = spark.sql("SELECT * FROM table")
-# df = spark.read.parquet("path")
+# COMMAND ----------
 
-# c) Architecture: Client sends plans, server executes
-# Benefits: Stability, resource isolation, multi-language support
+# MAGIC %md
+# MAGIC ## Problem 1: Adaptive Query Execution (AQE)
 
-# d) Connection handling
-# try:
-#     spark = SparkSession.builder.remote("sc://host:15002").getOrCreate()
-# except Exception as e:
-#     print(f"Connection failed: {e}")
-#     # Retry logic or fallback
+# COMMAND ----------
 
-
-# =============================================================================
-# Problem 2: Adaptive Query Execution (AQE)
-# =============================================================================
 # a) Enable AQE
 spark.conf.set("spark.sql.adaptive.enabled", "true")
+print(f"AQE enabled: {spark.conf.get('spark.sql.adaptive.enabled')}")
+
+# COMMAND ----------
 
 # b) Coalesce shuffle partitions
 spark.conf.set("spark.sql.adaptive.coalescePartitions.enabled", "true")
 spark.conf.set("spark.sql.adaptive.coalescePartitions.minPartitionSize", "64MB")
 spark.conf.set("spark.sql.adaptive.advisoryPartitionSizeInBytes", "128MB")
 
-# c) Convert to broadcast join
+print("Partition coalescing configured!")
+
+# COMMAND ----------
+
+# c) Convert to broadcast join dynamically
 spark.conf.set("spark.sql.adaptive.autoBroadcastJoinThreshold", "10MB")
+
+print("Auto broadcast threshold set!")
+
+# COMMAND ----------
 
 # d) Skew join optimization
 spark.conf.set("spark.sql.adaptive.skewJoin.enabled", "true")
 spark.conf.set("spark.sql.adaptive.skewJoin.skewedPartitionFactor", "5")
 spark.conf.set("spark.sql.adaptive.skewJoin.skewedPartitionThresholdInBytes", "256MB")
 
-# e) Monitor in explain plan
-sales.join(employees, sales.store_id == employees.emp_id).explain(mode="formatted")
+print("Skew join optimization enabled!")
 
+# COMMAND ----------
 
-# =============================================================================
-# Problem 3: Dynamic Partition Pruning (DPP)
-# =============================================================================
-# a) DPP pushes filter from dimension to fact table at runtime
-# Example: Filter on dimension pushes to fact partition scan
+# e) Monitor AQE in explain plan
+sales.join(employees, sales.customer_id == employees.emp_id).explain(mode="formatted")
 
-# b) Configure DPP
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Problem 2: Dynamic Partition Pruning (DPP)
+
+# COMMAND ----------
+
+# Configure DPP
 spark.conf.set("spark.sql.optimizer.dynamicPartitionPruning.enabled", "true")
 spark.conf.set("spark.sql.optimizer.dynamicPartitionPruning.useStats", "true")
 spark.conf.set("spark.sql.optimizer.dynamicPartitionPruning.fallbackFilterRatio", "0.5")
 
-# c) Verify in plan - look for DynamicPruningExpression
-# spark.sql("""
-#     SELECT * FROM fact_table f
-#     JOIN dim_table d ON f.dim_id = d.id
-#     WHERE d.category = 'Electronics'
-# """).explain()
+print("DPP configured!")
 
-# d) DPP works when:
-# - Fact table is partitioned
-# - Join on partition column
-# - Dimension filter is selective
+# COMMAND ----------
 
+# MAGIC %md
+# MAGIC ### DPP works when:
+# MAGIC - Fact table is partitioned
+# MAGIC - Join on partition column
+# MAGIC - Dimension filter is selective
+# MAGIC - Look for **DynamicPruningExpression** in explain plan
 
-# =============================================================================
-# Problem 4: Bloom Filter Join Optimization
-# =============================================================================
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Problem 3: Bloom Filter Join Optimization
+
+# COMMAND ----------
+
 # a) Enable bloom filter (Spark 3.3+)
 spark.conf.set("spark.sql.optimizer.runtime.bloomFilter.enabled", "true")
 spark.conf.set("spark.sql.optimizer.runtime.bloomFilter.creationSideThreshold", "10MB")
@@ -98,42 +101,50 @@ spark.conf.set("spark.sql.optimizer.runtime.bloomFilter.creationSideThreshold", 
 spark.conf.set("spark.sql.optimizer.runtime.bloomFilter.expectedNumItems", "1000000")
 spark.conf.set("spark.sql.optimizer.runtime.bloomFilter.numBits", "8388608")
 
-# c) Helps filter rows before shuffle/join
+print("Bloom filter optimization enabled!")
 
-# d) Check plan for BloomFilterMightContain
+# COMMAND ----------
 
+# MAGIC %md
+# MAGIC ## Problem 4: Storage Partitioned Join (Bucketing)
 
-# =============================================================================
-# Problem 5: Storage Partitioned Join
-# =============================================================================
-# a) Bucketed tables can join without shuffle
+# COMMAND ----------
+
+# a) Create bucketed tables
 employees.write \
     .bucketBy(8, "department") \
     .sortBy("salary") \
+    .mode("overwrite") \
     .saveAsTable("emp_bucketed")
 
-sales.write \
-    .bucketBy(8, "store_id") \
-    .sortBy("transaction_date") \
-    .saveAsTable("sales_bucketed")
+print("Bucketed table created!")
+
+# COMMAND ----------
 
 # b) Both tables must have same bucket count on join key
-
 # c) Join without shuffle
 spark.conf.set("spark.sql.sources.bucketing.enabled", "true")
 spark.conf.set("spark.sql.sources.bucketing.autoBucketedScan.enabled", "true")
 
 # result = spark.table("emp_bucketed").join(spark.table("other_bucketed"), "department")
 
+print("Bucketing configured!")
 
-# =============================================================================
-# Problem 6: Pandas API on Spark
-# =============================================================================
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Problem 5: Pandas API on Spark
+
+# COMMAND ----------
+
 import pyspark.pandas as ps
 
-# a) Use pandas API
+# a) Create using pandas API
 pdf = ps.DataFrame({"a": [1, 2, 3], "b": [4, 5, 6]})
 pdf["c"] = pdf["a"] + pdf["b"]
+display(pdf)
+
+# COMMAND ----------
 
 # b) Convert between APIs
 spark_df = employees
@@ -142,193 +153,144 @@ pandas_on_spark = spark_df.pandas_api()
 # Back to Spark DataFrame
 spark_df_again = pandas_on_spark.to_spark()
 
+print("Conversion complete!")
+
+# COMMAND ----------
+
 # c) Pandas functions on distributed data
 result = pandas_on_spark.groupby("department")["salary"].mean()
+display(result)
 
-# d) Limitations:
-# - Some operations require shuffle
-# - Not all pandas functions supported
-# - Index handling differs
+# COMMAND ----------
 
+# MAGIC %md
+# MAGIC ### Pandas API Limitations:
+# MAGIC - Some operations require shuffle
+# MAGIC - Not all pandas functions supported
+# MAGIC - Index handling differs from pandas
 
-# =============================================================================
-# Problem 7: Pandas-on-Spark Operations
-# =============================================================================
-import pyspark.pandas as ps
+# COMMAND ----------
 
-# a) DataFrame operations
-psdf = ps.read_csv("../datasets/csv/employees.csv")
-psdf = psdf[psdf["salary"] > 80000]
+# MAGIC %md
+# MAGIC ## Problem 6: ANSI SQL Mode
 
-# b) GroupBy
-grouped = psdf.groupby("department").agg({"salary": ["mean", "sum", "count"]})
+# COMMAND ----------
 
-# c) Window functions
-psdf["salary_rank"] = psdf.groupby("department")["salary"].rank(method="dense", ascending=False)
-
-# d) I/O
-psdf.to_parquet("output.parquet")
-psdf.to_csv("output.csv")
-
-
-# =============================================================================
-# Problem 8: Project Zen Improvements
-# =============================================================================
-# a) Type hints
-from pyspark.sql import DataFrame
-from pyspark.sql.types import StringType
-
-def process_data(df: DataFrame) -> DataFrame:
-    return df.filter(col("salary") > 80000)
-
-# b) Better error messages (Spark 3.4+)
-# Clearer stack traces, Python-native errors
-
-# c) New APIs
-# - DataFrame.transform() for chaining
-# - Improved pandas UDF syntax
-# - Better null handling
-
-# d) Python-native
-# - Better integration with type checkers
-# - IDE support improvements
-
-
-# =============================================================================
-# Problem 9: ANSI SQL Mode
-# =============================================================================
 # a) Enable ANSI mode
 spark.conf.set("spark.sql.ansi.enabled", "true")
+print("ANSI mode enabled!")
 
-# b) Behavior changes:
-# - Arithmetic overflow raises error (not wrap around)
-# - Invalid cast raises error (not null)
-# - Array index out of bounds raises error
+# COMMAND ----------
 
-# c) Handle errors
-try:
-    spark.sql("SELECT CAST('invalid' AS INT)").show()
-except Exception as e:
-    print(f"ANSI error: {e}")
+# MAGIC %md
+# MAGIC ### ANSI Mode Behavior Changes:
+# MAGIC - Arithmetic overflow raises error (not wrap around)
+# MAGIC - Invalid cast raises error (not null)
+# MAGIC - Array index out of bounds raises error
 
-# d) Use try_* functions for safe operations
-spark.sql("SELECT try_cast('invalid' AS INT)").show()  # Returns NULL
+# COMMAND ----------
 
+# b) Use try_* functions for safe operations
+display(spark.sql("SELECT try_cast('invalid' AS INT) as safe_cast"))
 
-# =============================================================================
-# Problem 10: Timestamp Types (Spark 3.0+)
-# =============================================================================
-# a) New timestamp types
-# TIMESTAMP_LTZ - Local timezone, stored as UTC
-# TIMESTAMP_NTZ - No timezone, stored as-is
+# COMMAND ----------
 
-spark.conf.set("spark.sql.timestampType", "TIMESTAMP_NTZ")
+# MAGIC %md
+# MAGIC ## Problem 7: SQL Hints
 
-# b) Timezone-aware
-spark.conf.set("spark.sql.session.timeZone", "America/New_York")
+# COMMAND ----------
 
-# c) Function changes
-from pyspark.sql.functions import to_timestamp, from_utc_timestamp, to_utc_timestamp
+# MAGIC %sql
+# MAGIC -- a) Broadcast hint
+# MAGIC SELECT /*+ BROADCAST(s) */ *
+# MAGIC FROM employees e
+# MAGIC JOIN sales s ON e.emp_id = s.customer_id
+# MAGIC LIMIT 10
 
-df = employees.withColumn("ts", to_timestamp(col("hire_date")))
-df = df.withColumn("ts_utc", to_utc_timestamp(col("ts"), "America/New_York"))
+# COMMAND ----------
 
-# d) Migration: Review timestamp handling in existing code
+# DataFrame API for hints
+from pyspark.sql.functions import broadcast
 
+result = employees.join(sales.hint("broadcast"), employees.emp_id == sales.customer_id)
+result.explain()
 
-# =============================================================================
-# Problem 11: SQL Hints
-# =============================================================================
-# a) Join hints
-# BROADCAST - broadcast smaller table
-# MERGE - sort-merge join
-# SHUFFLE_HASH - hash join
-# SHUFFLE_REPLICATE_NL - nested loop
+# COMMAND ----------
 
-spark.sql("""
-    SELECT /*+ BROADCAST(s) */ *
-    FROM employees e
-    JOIN sales s ON e.emp_id = s.customer_id
-""")
+# MAGIC %sql
+# MAGIC -- b) Coalesce/repartition hints
+# MAGIC SELECT /*+ COALESCE(1) */ * FROM employees LIMIT 5
 
-# DataFrame API
-employees.join(sales.hint("broadcast"), employees.emp_id == sales.customer_id)
+# COMMAND ----------
 
-# b) Coalesce/repartition hints
-spark.sql("SELECT /*+ COALESCE(1) */ * FROM employees")
-spark.sql("SELECT /*+ REPARTITION(4) */ * FROM employees")
-spark.sql("SELECT /*+ REPARTITION_BY_RANGE(department) */ * FROM employees")
+# MAGIC %sql
+# MAGIC -- c) Repartition hint
+# MAGIC SELECT /*+ REPARTITION(4) */ * FROM employees LIMIT 5
 
-# c) Skew hint
-spark.sql("""
-    SELECT /*+ SKEW('employees', 'department', ('Engineering')) */ *
-    FROM employees
-""")
+# COMMAND ----------
 
+# MAGIC %md
+# MAGIC ### Available Join Hints:
+# MAGIC | Hint | Description |
+# MAGIC |------|-------------|
+# MAGIC | **BROADCAST** | Broadcast smaller table |
+# MAGIC | **MERGE** | Sort-merge join |
+# MAGIC | **SHUFFLE_HASH** | Hash join |
+# MAGIC | **SHUFFLE_REPLICATE_NL** | Nested loop |
 
-# =============================================================================
-# Problem 12: Table-Valued Functions
-# =============================================================================
-# a) Built-in TVFs
-spark.sql("SELECT * FROM explode(array(1, 2, 3))")
-spark.sql("SELECT * FROM range(10)")
+# COMMAND ----------
 
-# b) Explode as TVF
-orders = spark.read.json("../datasets/json/orders.json")
-orders.createOrReplaceTempView("orders")
+# MAGIC %md
+# MAGIC ## Problem 8: Higher-Order Functions
 
-spark.sql("""
-    SELECT order_id, item.*
-    FROM orders
-    LATERAL VIEW explode(items) AS item
-""").show()
+# COMMAND ----------
 
-# c) Custom TVF (using PySpark)
-# Register Python function as TVF
-@spark.udf.register("generate_dates", returnType="array<date>")
-def generate_dates(start, end):
-    from datetime import timedelta
-    dates = []
-    current = start
-    while current <= end:
-        dates.append(current)
-        current += timedelta(days=1)
-    return dates
-
-
-# =============================================================================
-# Problem 13: Higher-Order Functions
-# =============================================================================
 # Sample data with arrays
 df = spark.createDataFrame([
     (1, [1, 2, 3, 4, 5]),
     (2, [10, 20, 30])
 ], ["id", "values"])
 
+display(df)
+
+# COMMAND ----------
+
 # a) transform - apply to each element
-df.select(
+df_transformed = df.select(
     "id",
     transform("values", lambda x: x * 2).alias("doubled")
-).show()
+)
+display(df_transformed)
+
+# COMMAND ----------
 
 # b) filter - keep matching elements
-df.select(
+df_filtered = df.select(
     "id",
     array_filter("values", lambda x: x > 2).alias("filtered")
-).show()
+)
+display(df_filtered)
+
+# COMMAND ----------
 
 # c) aggregate - reduce to single value
-df.select(
+df_agg = df.select(
     "id",
     aggregate("values", lit(0), lambda acc, x: acc + x).alias("sum")
-).show()
+)
+display(df_agg)
+
+# COMMAND ----------
 
 # d) exists/forall - predicates
-df.select(
+df_pred = df.select(
     "id",
     exists("values", lambda x: x > 10).alias("has_gt_10"),
     forall("values", lambda x: x > 0).alias("all_positive")
-).show()
+)
+display(df_pred)
+
+# COMMAND ----------
 
 # e) zip_with - combine arrays
 df2 = spark.createDataFrame([
@@ -336,158 +298,199 @@ df2 = spark.createDataFrame([
     (2, [1, 2, 3])
 ], ["id", "multipliers"])
 
-df.join(df2, "id").select(
+df_zipped = df.join(df2, "id").select(
     "id",
     zip_with("values", "multipliers", lambda x, y: x * y).alias("products")
-).show()
+)
+display(df_zipped)
 
+# COMMAND ----------
 
-# =============================================================================
-# Problem 14: Parameterized Queries
-# =============================================================================
-# a) SQL parameters (Spark 3.4+)
-spark.sql(
+# MAGIC %md
+# MAGIC ## Problem 9: Parameterized Queries (Spark 3.4+)
+
+# COMMAND ----------
+
+employees.createOrReplaceTempView("employees")
+
+# a) Named parameters
+display(spark.sql(
     "SELECT * FROM employees WHERE salary > :min_salary",
     args={"min_salary": 80000}
-).show()
+))
 
-# b) Named parameters
-spark.sql("""
+# COMMAND ----------
+
+# b) Multiple parameters
+display(spark.sql("""
     SELECT * FROM employees
     WHERE department = :dept AND salary > :min_sal
-""", args={"dept": "Engineering", "min_sal": 90000}).show()
+""", args={"dept": "Engineering", "min_sal": 90000}))
 
-# c) Positional parameters
-spark.sql(
-    "SELECT * FROM employees WHERE department = ?",
-    args=["Engineering"]
-).show()
+# COMMAND ----------
 
-# d) Security - parameters prevent SQL injection
+# MAGIC %md
+# MAGIC ### Parameterized Query Benefits:
+# MAGIC - Prevents SQL injection
+# MAGIC - Cleaner query construction
+# MAGIC - Supports named and positional parameters
 
+# COMMAND ----------
 
-# =============================================================================
-# Problem 15: Error Handling
-# =============================================================================
-# a) try_* functions (Spark 3.4+)
-spark.sql("""
-    SELECT
-        try_cast('abc' AS INT) as safe_cast,
-        try_add(2147483647, 1) as safe_add,
-        try_divide(10, 0) as safe_divide
-""").show()
+# MAGIC %md
+# MAGIC ## Problem 10: Error Handling Functions
 
-# b) Raise exceptions
-spark.sql("""
-    SELECT
-        CASE
-            WHEN salary < 0 THEN raise_error('Salary cannot be negative')
-            ELSE salary
-        END
-    FROM employees
-""")
+# COMMAND ----------
 
-# c) ASSERT (Spark SQL)
-# spark.sql("SELECT assert_true(1 > 0, 'Math is broken')")
+# MAGIC %sql
+# MAGIC -- a) try_* functions (Spark 3.4+)
+# MAGIC SELECT
+# MAGIC     try_cast('abc' AS INT) as safe_cast,
+# MAGIC     try_add(2147483647, 1) as safe_add,
+# MAGIC     try_divide(10, 0) as safe_divide
 
-# d) Error handling in expressions
-spark.sql("""
-    SELECT
-        COALESCE(try_cast(value AS INT), 0) as parsed_value
-    FROM source
-""")
+# COMMAND ----------
 
+# MAGIC %sql
+# MAGIC -- b) COALESCE with try functions
+# MAGIC SELECT
+# MAGIC     COALESCE(try_cast('abc' AS INT), 0) as parsed_with_default
 
-# =============================================================================
-# Problem 16: Streaming Enhancements
-# =============================================================================
-# a) Multiple stateful operators (Spark 3.2+)
-# Can chain multiple aggregations in single query
+# COMMAND ----------
 
-# b) Session windows (Spark 3.2+)
-# from pyspark.sql.functions import session_window
-# df.groupBy(session_window("timestamp", "5 minutes")).count()
+# MAGIC %md
+# MAGIC ## Problem 11: Table-Valued Functions
 
-# c) Async progress tracking
-# query.recentProgress  # Non-blocking
+# COMMAND ----------
 
-# d) AvailableNow trigger (Spark 3.3+)
-# .trigger(availableNow=True)  # Process all available, then stop
+# MAGIC %sql
+# MAGIC -- a) Built-in TVFs
+# MAGIC SELECT * FROM explode(array(1, 2, 3))
 
+# COMMAND ----------
 
-# =============================================================================
-# Problem 17: Delta Sharing
-# =============================================================================
-# a) Delta Sharing - open protocol for secure data sharing
-# - Share data without copying
-# - Works with Delta Lake tables
+# MAGIC %sql
+# MAGIC -- b) Range function
+# MAGIC SELECT * FROM range(10)
 
-# b) Create share (Delta Sharing server)
-# CREATE SHARE my_share;
-# ALTER SHARE my_share ADD TABLE my_schema.my_table;
+# COMMAND ----------
 
-# c) Access shared data
-# spark.read.format("deltaSharing").load("profile.json#share.schema.table")
+# Read orders for LATERAL VIEW demo
+orders = spark.read.json("datasets/json/orders.json")
+orders.createOrReplaceTempView("orders")
 
-# d) Security: Uses bearer tokens, no direct data access
+# COMMAND ----------
 
+# MAGIC %sql
+# MAGIC -- c) LATERAL VIEW with explode
+# MAGIC SELECT order_id, item.*
+# MAGIC FROM orders
+# MAGIC LATERAL VIEW explode(items) AS item
 
-# =============================================================================
-# Problem 18: Unity Catalog
-# =============================================================================
-# a) Three-level namespace: catalog.schema.table
-# spark.sql("SELECT * FROM main.default.employees")
+# COMMAND ----------
 
-# b) Data governance
-# - Fine-grained access control
-# - Audit logging
-# - Data discovery
+# MAGIC %md
+# MAGIC ## Problem 12: Timestamp Types (Spark 3.0+)
 
-# c) Access control
-# GRANT SELECT ON TABLE catalog.schema.table TO user@domain.com
+# COMMAND ----------
 
-# d) Lineage tracking
-# Automatic tracking of data flow through queries
+# a) Configure timestamp type
+# TIMESTAMP_LTZ - Local timezone, stored as UTC
+# TIMESTAMP_NTZ - No timezone, stored as-is
 
+spark.conf.set("spark.sql.timestampType", "TIMESTAMP_NTZ")
+print(f"Timestamp type: {spark.conf.get('spark.sql.timestampType')}")
 
-# =============================================================================
-# Problem 19: Photon Engine
-# =============================================================================
-# a) Photon: Native vectorized execution engine for Databricks
-# - Written in C++
-# - Columnar processing
-# - SIMD optimizations
+# COMMAND ----------
 
-# b) Enable Photon (Databricks)
-# Cluster configuration: Runtime with Photon enabled
+# b) Timezone-aware operations
+from pyspark.sql.functions import to_timestamp, from_utc_timestamp, to_utc_timestamp
 
-# c) Compatible operations:
-# - Scans, filters, projections
-# - Aggregations
-# - Joins
-# - Some string operations
+spark.conf.set("spark.sql.session.timeZone", "America/New_York")
 
-# d) Performance: 2-8x faster for supported operations
+df = employees.withColumn("ts", to_timestamp(col("hire_date")))
+df = df.withColumn("ts_utc", to_utc_timestamp(col("ts"), "America/New_York"))
+display(df.select("name", "hire_date", "ts", "ts_utc"))
 
+# COMMAND ----------
 
-# =============================================================================
-# Problem 20: Predictive Optimization
-# =============================================================================
-# a) Automatic optimization (Databricks)
-# - Auto OPTIMIZE
-# - Auto VACUUM
-# - Auto ANALYZE
+# MAGIC %md
+# MAGIC ## Problem 13: Streaming Enhancements
 
-# b) Statistics collection
-spark.sql("ANALYZE TABLE employees COMPUTE STATISTICS")
-spark.sql("ANALYZE TABLE employees COMPUTE STATISTICS FOR ALL COLUMNS")
+# COMMAND ----------
 
-# c) Optimize write
-spark.conf.set("spark.databricks.delta.optimizeWrite.enabled", "true")
-spark.conf.set("spark.databricks.delta.autoCompact.enabled", "true")
+# MAGIC %md
+# MAGIC ### Streaming Improvements (Spark 3.2+):
+# MAGIC - **Multiple stateful operators**: Chain multiple aggregations
+# MAGIC - **Session windows**: `session_window("timestamp", "5 minutes")`
+# MAGIC - **Async progress tracking**: Non-blocking `query.recentProgress`
+# MAGIC - **AvailableNow trigger**: Process all available data, then stop
 
-# d) Auto-tuning
-# Databricks automatically adjusts:
-# - File sizes
-# - Partition counts
-# - Join strategies
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Problem 14: Unity Catalog
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Unity Catalog Features:
+# MAGIC - **Three-level namespace**: `catalog.schema.table`
+# MAGIC - **Fine-grained access control**: Row/column level security
+# MAGIC - **Audit logging**: Track all data access
+# MAGIC - **Data lineage**: Automatic tracking of data flow
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC -- Example Unity Catalog query
+# MAGIC -- SELECT * FROM main.default.employees
+# MAGIC
+# MAGIC -- Grant access
+# MAGIC -- GRANT SELECT ON TABLE catalog.schema.table TO user@domain.com
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Problem 15: Performance Tuning Summary
+
+# COMMAND ----------
+
+# Key configurations summary
+configs = {
+    "spark.sql.adaptive.enabled": spark.conf.get("spark.sql.adaptive.enabled"),
+    "spark.sql.adaptive.coalescePartitions.enabled": spark.conf.get("spark.sql.adaptive.coalescePartitions.enabled"),
+    "spark.sql.adaptive.skewJoin.enabled": spark.conf.get("spark.sql.adaptive.skewJoin.enabled"),
+    "spark.sql.ansi.enabled": spark.conf.get("spark.sql.ansi.enabled"),
+}
+
+for key, value in configs.items():
+    print(f"{key}: {value}")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Advanced Features Summary
+# MAGIC
+# MAGIC | Feature | Spark Version | Purpose |
+# MAGIC |---------|---------------|---------|
+# MAGIC | **AQE** | 3.0+ | Runtime query optimization |
+# MAGIC | **DPP** | 3.0+ | Partition pruning at runtime |
+# MAGIC | **Bloom Filters** | 3.3+ | Join optimization |
+# MAGIC | **Pandas API** | 3.2+ | Pandas-like operations |
+# MAGIC | **Parameterized Queries** | 3.4+ | Safe SQL injection |
+# MAGIC | **try_* Functions** | 3.4+ | Safe error handling |
+# MAGIC | **Session Windows** | 3.2+ | Streaming sessions |
+# MAGIC | **Unity Catalog** | Databricks | Unified governance |
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Best Practices
+# MAGIC
+# MAGIC 1. **Always enable AQE** for production workloads
+# MAGIC 2. **Use broadcast joins** for small dimension tables
+# MAGIC 3. **Leverage bucketing** for repeated joins on same keys
+# MAGIC 4. **Use parameterized queries** to prevent SQL injection
+# MAGIC 5. **Enable ANSI mode** for stricter type checking
+# MAGIC 6. **Use higher-order functions** instead of UDFs for array operations

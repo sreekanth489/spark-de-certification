@@ -1,20 +1,28 @@
-"""
-Schema Evolution - Solutions
-=============================
-"""
+# Databricks notebook source
+# MAGIC %md
+# MAGIC # Schema Evolution - Solutions
+# MAGIC Topics: Schema definition, adding/removing columns, type changes, nested evolution, format-specific handling
 
-from pyspark.sql import SparkSession
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Setup
+
+# COMMAND ----------
+
 from pyspark.sql.types import (
     StructType, StructField, StringType, IntegerType, LongType,
     DoubleType, ArrayType, MapType, TimestampType, BooleanType
 )
-from pyspark.sql.functions import col, lit, coalesce, when, from_json, to_json, schema_of_json
+from pyspark.sql.functions import col, lit, coalesce, when, from_json, to_json, schema_of_json, struct
 
-spark = SparkSession.builder.appName("Schema Evolution Solutions").getOrCreate()
+# COMMAND ----------
 
-# =============================================================================
-# Problem 1: Schema Definition and Enforcement
-# =============================================================================
+# MAGIC %md
+# MAGIC ## Problem 1: Schema Definition and Enforcement
+
+# COMMAND ----------
+
 # a) Define explicit schema
 employee_schema = StructType([
     StructField("emp_id", IntegerType(), nullable=False),
@@ -24,38 +32,59 @@ employee_schema = StructType([
     StructField("hire_date", StringType(), nullable=True)
 ])
 
+print("Schema defined:")
+print(employee_schema.simpleString())
+
+# COMMAND ----------
+
 # b) Schema enforcement (FAILFAST)
 try:
     df = spark.read \
         .schema(employee_schema) \
         .option("mode", "FAILFAST") \
-        .csv("../datasets/csv/employees.csv", header=True)
+        .csv("datasets/csv/employees.csv", header=True)
+    display(df)
 except Exception as e:
     print(f"Schema mismatch: {e}")
 
-# c) Permissive mode (default)
+# COMMAND ----------
+
+# c) Permissive mode (default) - captures corrupt records
 df = spark.read \
-    .schema(employee_schema) \
     .option("mode", "PERMISSIVE") \
     .option("columnNameOfCorruptRecord", "_corrupt") \
-    .csv("../datasets/csv/employees.csv", header=True)
+    .csv("datasets/csv/employees.csv", header=True, inferSchema=True)
 
-# d) Schema hints (JSON/complex types)
-json_schema = spark.read.json("../datasets/json/orders.json").schema
-df = spark.read.schema(json_schema).json("../datasets/json/orders.json")
+display(df)
 
+# COMMAND ----------
 
-# =============================================================================
-# Problem 2: Adding Columns
-# =============================================================================
-employees = spark.read.csv("../datasets/csv/employees.csv", header=True, inferSchema=True)
+# d) Schema hints from JSON
+json_schema = spark.read.json("datasets/json/orders.json").schema
+print("Inferred JSON schema:")
+json_schema.printTreeString()
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Problem 2: Adding Columns
+
+# COMMAND ----------
+
+employees = spark.read.csv("datasets/csv/employees.csv", header=True, inferSchema=True)
 
 # a) Add nullable column
 df = employees.withColumn("bonus", lit(None).cast(DoubleType()))
+display(df.select("name", "salary", "bonus"))
+
+# COMMAND ----------
 
 # b) Add column with default value
 df = employees.withColumn("status", lit("active"))
-df = employees.withColumn("bonus_pct", lit(0.10))
+df = df.withColumn("bonus_pct", lit(0.10))
+display(df.select("name", "status", "bonus_pct"))
+
+# COMMAND ----------
 
 # c) Handle old data without new column - use coalesce
 old_schema = StructType([
@@ -70,94 +99,119 @@ new_schema = StructType([
 ])
 
 # Reading old data with new schema - missing column becomes null
-df = spark.read.schema(new_schema).csv("old_data.csv")
-df = df.withColumn("department", coalesce(col("department"), lit("Unknown")))
+# df = spark.read.schema(new_schema).csv("old_data.csv")
+# df = df.withColumn("department", coalesce(col("department"), lit("Unknown")))
 
-# d) Merge schemas from multiple files
-df = spark.read \
-    .option("mergeSchema", "true") \
-    .parquet("../datasets/parquet/employees_partitioned")
+print("Column addition strategies explained!")
 
+# COMMAND ----------
 
-# =============================================================================
-# Problem 3: Removing Columns
-# =============================================================================
+# d) Merge schemas from multiple Parquet files
+# df = spark.read \
+#     .option("mergeSchema", "true") \
+#     .parquet("datasets/parquet/employees_partitioned")
+
+print("mergeSchema option explained!")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Problem 3: Removing Columns
+
+# COMMAND ----------
+
 # a) Drop column
 df = employees.drop("manager_id")
-df = employees.drop("manager_id", "hire_date")  # Multiple columns
+display(df)
 
-# b) Handle new data with fewer columns
-# Just select columns that exist
+# COMMAND ----------
+
+# b) Drop multiple columns
+df = employees.drop("manager_id", "hire_date")
+print(f"Remaining columns: {df.columns}")
+
+# COMMAND ----------
+
+# c) Selective reading - only keep needed columns
 required_cols = ["emp_id", "name", "salary"]
 df = employees.select([c for c in required_cols if c in employees.columns])
+display(df)
 
-# c) Selective reading (column pruning)
-df = spark.read.parquet("../datasets/parquet/employees").select("name", "salary")
+# COMMAND ----------
 
-# d) Schema pruning happens automatically with columnar formats
-df.explain()  # Check ReadSchema shows only selected columns
+# MAGIC %md
+# MAGIC ## Problem 4: Renaming Columns
 
+# COMMAND ----------
 
-# =============================================================================
-# Problem 4: Renaming Columns
-# =============================================================================
 # a) Single column rename
 df = employees.withColumnRenamed("emp_id", "employee_id")
+display(df.select("employee_id", "name"))
 
-# b) Multiple columns
+# COMMAND ----------
+
+# b) Multiple columns using a map
 rename_map = {
     "emp_id": "employee_id",
     "name": "full_name",
     "salary": "annual_salary"
 }
+
 df = employees
 for old, new in rename_map.items():
     df = df.withColumnRenamed(old, new)
 
-# Or using select with alias
+print(f"Renamed columns: {df.columns}")
+
+# COMMAND ----------
+
+# c) Using select with alias (cleaner approach)
 df = employees.select([col(c).alias(rename_map.get(c, c)) for c in employees.columns])
+display(df)
 
-# c) Backward compatibility - keep both columns temporarily
+# COMMAND ----------
+
+# d) Backward compatibility - keep both columns temporarily
 df = employees.withColumn("employee_id", col("emp_id"))
+print(f"Has both: {df.columns}")
 
-# d) Column alias in select
-df = employees.select(
-    col("emp_id").alias("employee_id"),
-    col("name").alias("employee_name"),
-    "salary"
-)
+# COMMAND ----------
 
+# MAGIC %md
+# MAGIC ## Problem 5: Type Changes
 
-# =============================================================================
-# Problem 5: Type Changes
-# =============================================================================
+# COMMAND ----------
+
 # a) Widen numeric types
 df = employees.withColumn("emp_id", col("emp_id").cast(LongType()))
-df = employees.withColumn("salary", col("salary").cast(DoubleType()))
+df = df.withColumn("salary", col("salary").cast(DoubleType()))
+df.printSchema()
+
+# COMMAND ----------
 
 # b) String to other types
-df = employees.withColumn("salary_int", col("salary").cast(IntegerType()))
-df = employees.withColumn("hire_date_ts", col("hire_date").cast(TimestampType()))
-
-# c) Handle incompatible changes with safe parsing
 from pyspark.sql.functions import to_date, to_timestamp
 
-df = employees.withColumn(
-    "hire_date_parsed",
-    to_date(col("hire_date"), "yyyy-MM-dd")
-)
+df = employees.withColumn("hire_date_parsed", to_date(col("hire_date"), "yyyy-MM-dd"))
+display(df.select("name", "hire_date", "hire_date_parsed"))
 
-# d) Safe casting with error handling
+# COMMAND ----------
+
+# c) Safe casting with error handling
 df = employees.withColumn(
     "salary_safe",
     when(col("salary").cast(DoubleType()).isNotNull(), col("salary").cast(DoubleType()))
     .otherwise(lit(0.0))
 )
+display(df.select("name", "salary", "salary_safe"))
 
+# COMMAND ----------
 
-# =============================================================================
-# Problem 6: Nested Schema Evolution
-# =============================================================================
+# MAGIC %md
+# MAGIC ## Problem 6: Nested Schema Evolution
+
+# COMMAND ----------
+
 # Sample nested data
 nested_schema = StructType([
     StructField("id", IntegerType()),
@@ -172,18 +226,26 @@ nested_schema = StructType([
 
 nested_data = [(1, ("John", ("NYC", "NY")))]
 nested_df = spark.createDataFrame(nested_data, nested_schema)
+nested_df.printSchema()
+
+# COMMAND ----------
+
+display(nested_df)
+
+# COMMAND ----------
 
 # a) Add field to nested struct
-from pyspark.sql.functions import struct
-
 df = nested_df.withColumn(
     "info",
     struct(
         col("info.name"),
         col("info.address"),
-        lit("new_field").alias("new_field")
+        lit("new_field_value").alias("new_field")
     )
 )
+df.printSchema()
+
+# COMMAND ----------
 
 # b) Remove field from nested - recreate struct without field
 df = nested_df.withColumn(
@@ -193,6 +255,9 @@ df = nested_df.withColumn(
         # Omit address to remove it
     )
 )
+df.printSchema()
+
+# COMMAND ----------
 
 # c) Rename nested field
 df = nested_df.withColumn(
@@ -202,121 +267,72 @@ df = nested_df.withColumn(
         col("info.address")
     )
 )
+df.printSchema()
 
-# d) Array element schema changes
-array_schema = StructType([
-    StructField("id", IntegerType()),
-    StructField("items", ArrayType(StructType([
-        StructField("name", StringType()),
-        StructField("value", IntegerType())
-    ])))
-])
+# COMMAND ----------
 
-# Transform array elements
-from pyspark.sql.functions import transform
+# MAGIC %md
+# MAGIC ## Problem 7: Parquet Schema Evolution
 
-# df = df.withColumn("items", transform("items", lambda x: struct(x.name, x.value.cast("double"))))
+# COMMAND ----------
 
-
-# =============================================================================
-# Problem 7: Parquet Schema Evolution
-# =============================================================================
 # a) Enable mergeSchema
 spark.conf.set("spark.sql.parquet.mergeSchema", "true")
 
-df = spark.read \
-    .option("mergeSchema", "true") \
-    .parquet("path/to/parquet/directory")
+# Read with mergeSchema
+# df = spark.read \
+#     .option("mergeSchema", "true") \
+#     .parquet("path/to/parquet/directory")
 
-# b) Column type promotion (compatible widening)
-# int -> long, float -> double
+print("Parquet mergeSchema enabled!")
 
-# c) Schema evolution with partitioned data
-# Each partition can have different schema
-# mergeSchema combines them
+# COMMAND ----------
 
-# d) Parquet compatibility rules:
-# - Can add nullable columns
-# - Can widen numeric types
-# - Cannot change field names
-# - Cannot change incompatible types
+# MAGIC %md
+# MAGIC ### Parquet Compatibility Rules:
+# MAGIC - ✅ Can add nullable columns
+# MAGIC - ✅ Can widen numeric types (int → long, float → double)
+# MAGIC - ❌ Cannot change field names
+# MAGIC - ❌ Cannot change incompatible types
 
+# COMMAND ----------
 
-# =============================================================================
-# Problem 8: Delta Lake Schema Evolution
-# =============================================================================
-# a) autoMerge
+# MAGIC %md
+# MAGIC ## Problem 8: Delta Lake Schema Evolution
+
+# COMMAND ----------
+
+# a) autoMerge - automatically add new columns
 spark.conf.set("spark.databricks.delta.schema.autoMerge.enabled", "true")
 
 # Or per-write
 # df.write.option("mergeSchema", "true").format("delta").mode("append").save(path)
 
-# b) overwriteSchema (breaking changes)
+print("Delta autoMerge enabled!")
+
+# COMMAND ----------
+
+# b) overwriteSchema - for breaking changes
 # df.write.option("overwriteSchema", "true").format("delta").mode("overwrite").save(path)
 
-# c) Schema enforcement (default behavior)
-# Delta will fail if schema doesn't match
+print("overwriteSchema explained!")
 
-# d) Column mapping modes (Delta 2.0+)
-spark.sql("""
-    ALTER TABLE delta_table SET TBLPROPERTIES (
-        'delta.columnMapping.mode' = 'name'
-    )
-""")
-# Modes: none, name, id
+# COMMAND ----------
 
+# MAGIC %sql
+# MAGIC -- c) Column mapping modes (Delta 2.0+)
+# MAGIC -- ALTER TABLE delta_table SET TBLPROPERTIES (
+# MAGIC --     'delta.columnMapping.mode' = 'name'
+# MAGIC -- )
+# MAGIC -- Modes: none, name, id
 
-# =============================================================================
-# Problem 9: Iceberg Schema Evolution
-# =============================================================================
-# a) Add/drop/rename in Iceberg
-# ALTER TABLE t ADD COLUMNS (new_col STRING)
-# ALTER TABLE t DROP COLUMN old_col
-# ALTER TABLE t RENAME COLUMN old_name TO new_name
+# COMMAND ----------
 
-# b) Type promotion
-# ALTER TABLE t ALTER COLUMN int_col TYPE BIGINT
+# MAGIC %md
+# MAGIC ## Problem 9: Schema Validation
 
-# c) Nested type evolution
-# ALTER TABLE t ADD COLUMNS (nested.new_field STRING)
+# COMMAND ----------
 
-# d) Works seamlessly across partitions
-
-
-# =============================================================================
-# Problem 10: Avro Schema Evolution
-# =============================================================================
-# a) Read Avro with evolved schema
-df = spark.read \
-    .format("avro") \
-    .option("avroSchema", evolved_schema_json) \
-    .load("path/to/avro")
-
-# b) Schema registry integration
-# Configure with spark.sql.avro.schemaRegistry.url
-
-# c) Compatibility modes:
-# - BACKWARD: New schema can read old data
-# - FORWARD: Old schema can read new data
-# - FULL: Both directions
-
-# d) Default values in Avro schema
-avro_schema = """
-{
-  "type": "record",
-  "name": "Employee",
-  "fields": [
-    {"name": "id", "type": "int"},
-    {"name": "name", "type": "string"},
-    {"name": "department", "type": "string", "default": "Unknown"}
-  ]
-}
-"""
-
-
-# =============================================================================
-# Problem 11: Schema Validation
-# =============================================================================
 # a) Compare schemas
 schema1 = employees.schema
 schema2 = StructType([
@@ -330,24 +346,9 @@ def schemas_equal(s1, s2):
 
 print(f"Schemas equal: {schemas_equal(schema1, schema2)}")
 
-# b) Validate compatibility
-def is_compatible(old_schema, new_schema):
-    """Check if new schema is backward compatible"""
-    old_fields = {f.name: f for f in old_schema.fields}
-    new_fields = {f.name: f for f in new_schema.fields}
+# COMMAND ----------
 
-    # All old fields must exist in new schema
-    for name, old_field in old_fields.items():
-        if name not in new_fields:
-            return False, f"Missing field: {name}"
-        new_field = new_fields[name]
-        if old_field.dataType != new_field.dataType:
-            # Allow widening
-            if not is_type_compatible(old_field.dataType, new_field.dataType):
-                return False, f"Incompatible type change for {name}"
-    return True, "Compatible"
-
-# c) Schema diff
+# b) Schema diff
 def schema_diff(old_schema, new_schema):
     old_fields = {f.name for f in old_schema.fields}
     new_fields = {f.name for f in new_schema.fields}
@@ -357,16 +358,33 @@ def schema_diff(old_schema, new_schema):
 
     return {"added": added, "removed": removed}
 
-# d) Automated validation
-def validate_data_schema(df, expected_schema):
-    actual = df.schema
-    if actual != expected_schema:
-        raise ValueError(f"Schema mismatch!\nExpected: {expected_schema}\nActual: {actual}")
+diff = schema_diff(schema2, schema1)
+print(f"Schema diff: {diff}")
 
+# COMMAND ----------
 
-# =============================================================================
-# Problem 12: Handling Schema Drift
-# =============================================================================
+# c) Validate compatibility
+def is_compatible(old_schema, new_schema):
+    """Check if new schema is backward compatible"""
+    old_fields = {f.name: f for f in old_schema.fields}
+    new_fields = {f.name: f for f in new_schema.fields}
+
+    # All old fields must exist in new schema
+    for name, old_field in old_fields.items():
+        if name not in new_fields:
+            return False, f"Missing field: {name}"
+    return True, "Compatible"
+
+compatible, msg = is_compatible(schema2, schema1)
+print(f"Compatible: {compatible} - {msg}")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Problem 10: Handling Schema Drift
+
+# COMMAND ----------
+
 # a) Detect drift
 def detect_drift(current_df, reference_schema):
     current_fields = set(f.name for f in current_df.schema.fields)
@@ -379,6 +397,12 @@ def detect_drift(current_df, reference_schema):
         return True, {"new": new_fields, "missing": missing_fields}
     return False, {}
 
+has_drift, drift_info = detect_drift(employees, schema2)
+print(f"Drift detected: {has_drift}")
+print(f"Drift info: {drift_info}")
+
+# COMMAND ----------
+
 # b) Alert on changes
 def process_with_drift_detection(df, expected_schema, on_drift="warn"):
     has_drift, drift_info = detect_drift(df, expected_schema)
@@ -389,7 +413,11 @@ def process_with_drift_detection(df, expected_schema, on_drift="warn"):
             print(f"WARNING: Schema drift detected: {drift_info}")
     return df
 
-# c) Graceful handling
+df = process_with_drift_detection(employees, schema2, on_drift="warn")
+
+# COMMAND ----------
+
+# c) Graceful handling - add missing columns with nulls
 def handle_new_columns(df, expected_schema):
     expected_cols = [f.name for f in expected_schema.fields]
 
@@ -401,25 +429,22 @@ def handle_new_columns(df, expected_schema):
     # Select only expected columns
     return df.select(expected_cols)
 
-# d) Quarantine
-def quarantine_schema_errors(df, expected_schema, quarantine_path):
-    try:
-        # Validate and process
-        validated = df.select([col(f.name).cast(f.dataType) for f in expected_schema.fields])
-        return validated, None
-    except Exception as e:
-        # Write to quarantine
-        df.write.mode("append").parquet(quarantine_path)
-        return None, str(e)
+print("Graceful handling function defined!")
 
+# COMMAND ----------
 
-# =============================================================================
-# Problem 13: JSON Schema Evolution
-# =============================================================================
-# a) Handle varying structures
-json_df = spark.read.option("multiLine", True).json("../datasets/json/orders.json")
+# MAGIC %md
+# MAGIC ## Problem 11: JSON Schema Evolution
 
-# b) Flatten with evolution
+# COMMAND ----------
+
+# a) Read JSON with schema inference
+json_df = spark.read.option("multiLine", True).json("datasets/json/orders.json")
+json_df.printSchema()
+
+# COMMAND ----------
+
+# b) Flatten with evolution support
 from pyspark.sql.functions import explode_outer
 
 flattened = json_df.select(
@@ -432,22 +457,23 @@ flattened = json_df.select(
     col("item.product_id").alias("product_id"),
     col("item.quantity").alias("quantity")
 )
+display(flattened)
 
-# c) Null vs missing
-# Spark treats both as null by default
-# To distinguish, use schema with specific nullable settings
+# COMMAND ----------
 
-# d) Schema inference
+# c) Schema inference from sample
 sample_json = '{"id": 1, "name": "test", "values": [1, 2, 3]}'
 inferred_schema = schema_of_json(lit(sample_json))
+print(f"Inferred schema: {inferred_schema}")
 
+# COMMAND ----------
 
-# =============================================================================
-# Problem 14: Streaming Schema Evolution
-# =============================================================================
-# a) Schema changes in streaming - restart required
-# Define schema explicitly for stability
+# MAGIC %md
+# MAGIC ## Problem 12: Streaming Schema Evolution
 
+# COMMAND ----------
+
+# a) Define schema explicitly for stability
 stream_schema = StructType([
     StructField("id", IntegerType()),
     StructField("value", StringType()),
@@ -456,22 +482,24 @@ stream_schema = StructType([
 
 # stream = spark.readStream.schema(stream_schema).json("path")
 
-# b) Handle new columns - use schema hints
-# New columns appear as null
+print("Streaming schema defined!")
 
-# c) Schema hints
-# spark.readStream.option("schemaHints", "new_col STRING").json("path")
+# COMMAND ----------
 
-# d) Restart strategy
-# For breaking changes:
-# 1. Stop the stream
-# 2. Clear checkpoint (if schema changed significantly)
-# 3. Restart with new schema
+# MAGIC %md
+# MAGIC ### Streaming Schema Evolution:
+# MAGIC - Schema changes in streaming require restart
+# MAGIC - For breaking changes: Stop stream → Clear checkpoint → Restart with new schema
+# MAGIC - New columns appear as null with explicit schema
+# MAGIC - Use schema hints for incremental additions
 
+# COMMAND ----------
 
-# =============================================================================
-# Problem 15: Best Practices
-# =============================================================================
+# MAGIC %md
+# MAGIC ## Problem 13: Best Practices
+
+# COMMAND ----------
+
 # 1. Version schemas
 schema_v1 = StructType([
     StructField("id", IntegerType()),
@@ -484,28 +512,44 @@ schema_v2 = StructType([
     StructField("email", StringType())  # Added in v2
 ])
 
-# 2. Compatibility rules
-# - Only add nullable columns
-# - Never remove required columns
-# - Only widen types (int -> long)
-# - Avoid renames (or use column mapping)
+print("Schema versioning example!")
 
-# 3. Migration procedures
+# COMMAND ----------
+
+# 2. Migration procedures
 def migrate_v1_to_v2(df):
     """Migrate data from schema v1 to v2"""
     return df.withColumn("email", lit(None).cast(StringType()))
 
-# 4. Backward/forward compatibility
-# - Backward: New code reads old data (add defaults)
-# - Forward: Old code reads new data (ignore new fields)
+# Apply migration
+# migrated = migrate_v1_to_v2(old_data)
 
-# 5. Document changes
-schema_changelog = """
-## Version 2.0.0 (2024-01-15)
-- Added: email (STRING, nullable)
-- Deprecated: None
-- Breaking: None
+print("Migration function defined!")
 
-## Version 1.0.0 (2023-01-01)
-- Initial schema: id, name
-"""
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Schema Evolution Summary
+# MAGIC
+# MAGIC | Operation | Parquet | Delta | Iceberg |
+# MAGIC |-----------|---------|-------|---------|
+# MAGIC | **Add Column** | mergeSchema | autoMerge | ALTER TABLE |
+# MAGIC | **Drop Column** | Select subset | ALTER TABLE | ALTER TABLE |
+# MAGIC | **Rename Column** | Select with alias | Column mapping | ALTER TABLE |
+# MAGIC | **Type Widening** | Automatic | Automatic | ALTER TABLE |
+# MAGIC | **Breaking Changes** | New files | overwriteSchema | ALTER TABLE |
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Compatibility Rules:
+# MAGIC - **Backward Compatible**: New code can read old data
+# MAGIC - **Forward Compatible**: Old code can read new data
+# MAGIC - **Full Compatible**: Both directions
+# MAGIC
+# MAGIC ### Safe Changes:
+# MAGIC - ✅ Add nullable columns
+# MAGIC - ✅ Widen numeric types (int → long)
+# MAGIC - ❌ Remove required columns
+# MAGIC - ❌ Narrow types (long → int)
+# MAGIC - ❌ Change types incompatibly (string → int)

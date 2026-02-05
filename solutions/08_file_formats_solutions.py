@@ -1,68 +1,83 @@
-"""
-File Formats - Solutions
-=========================
-"""
+# Databricks notebook source
+# MAGIC %md
+# MAGIC # File Formats - Solutions
+# MAGIC Topics: CSV, JSON, Parquet, ORC, Delta, schema handling, compression
 
-from pyspark.sql import SparkSession
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Setup
+
+# COMMAND ----------
+
 from pyspark.sql.types import StructType, StructField, StringType, IntegerType, DoubleType, ArrayType, MapType
-from pyspark.sql.functions import col, input_file_name, current_timestamp, explode
+from pyspark.sql.functions import col, input_file_name, explode
 
-spark = SparkSession.builder \
-    .appName("File Formats Solutions") \
-    .config("spark.sql.adaptive.enabled", "true") \
-    .getOrCreate()
+# COMMAND ----------
 
-# =============================================================================
-# Problem 1: CSV Operations
-# =============================================================================
-# a) Read CSV with pipe delimiter
-pipe_csv = """id|name|value
-1|Alice|100
-2|Bob|200"""
+# MAGIC %md
+# MAGIC ## Problem 1: CSV Operations
 
-# Save sample file first
-with open("../datasets/csv/pipe_delimited.csv", "w") as f:
-    f.write(pipe_csv)
+# COMMAND ----------
 
-df = spark.read.option("delimiter", "|").option("header", True).csv("../datasets/csv/pipe_delimited.csv")
-df.show()
+# a) Read CSV with custom delimiter (pipe |)
+# First create sample pipe-delimited file
+pipe_data = [("1", "Alice", "100"), ("2", "Bob", "200")]
+pipe_df = spark.createDataFrame(pipe_data, ["id", "name", "value"])
+pipe_df.write.mode("overwrite").option("delimiter", "|").csv("/tmp/pipe_delimited")
+
+# Read it back
+df = spark.read.option("delimiter", "|").option("header", False).csv("/tmp/pipe_delimited")
+display(df)
+
+# COMMAND ----------
 
 # b) Custom null value
-df = spark.read.option("nullValue", "NA").option("header", True).csv("../datasets/csv/employees.csv")
+df = spark.read.option("nullValue", "NA").option("header", True).csv("datasets/csv/employees.csv")
+display(df)
 
-# c) Multiline values
-df = spark.read.option("multiLine", True).option("header", True).csv("path/to/multiline.csv")
-
-# d) Custom quote character
-df = spark.read.option("quote", "'").option("header", True).csv("path/to/file.csv")
+# COMMAND ----------
 
 # e) Skip malformed records
 df = spark.read \
     .option("mode", "DROPMALFORMED") \
     .option("header", True) \
-    .csv("../datasets/csv/employees.csv")
+    .csv("datasets/csv/employees.csv")
+display(df)
 
-# Other modes: PERMISSIVE (default), FAILFAST
+# COMMAND ----------
 
+# MAGIC %md
+# MAGIC ### CSV Read Modes:
+# MAGIC - **PERMISSIVE** (default): Sets null for corrupt fields
+# MAGIC - **DROPMALFORMED**: Drops corrupt records
+# MAGIC - **FAILFAST**: Fails immediately on corrupt records
 
-# =============================================================================
-# Problem 2: JSON Operations
-# =============================================================================
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Problem 2: JSON Operations
+
+# COMMAND ----------
+
 # a) Single-line JSON (default)
-df = spark.read.json("../datasets/json/events.json")
-df.show()
+df = spark.read.json("datasets/json/events.json")
+display(df)
 
-# b) Multi-line JSON
-df = spark.read.option("multiLine", True).json("path/to/multiline.json")
+# COMMAND ----------
 
 # c) Nested structures
-orders = spark.read.json("../datasets/json/orders.json")
+orders = spark.read.json("datasets/json/orders.json")
 orders.printSchema()
-orders.show(truncate=False)
+
+# COMMAND ----------
+
+display(orders)
+
+# COMMAND ----------
 
 # d) Flatten nested JSON
-# Access nested fields
-orders.select(
+flattened = orders.select(
     "order_id",
     col("shipping.city").alias("ship_city"),
     col("shipping.state").alias("ship_state"),
@@ -73,283 +88,274 @@ orders.select(
     "ship_state",
     col("item.product_id"),
     col("item.quantity")
-).show()
+)
+display(flattened)
 
-# e) Varying schemas - use mergeSchema
-df = spark.read.option("mergeSchema", True).json("path/to/json/dir/")
+# COMMAND ----------
 
+# MAGIC %md
+# MAGIC ## Problem 3: Parquet Operations
 
-# =============================================================================
-# Problem 3: Parquet Operations
-# =============================================================================
-employees = spark.read.csv("../datasets/csv/employees.csv", header=True, inferSchema=True)
+# COMMAND ----------
+
+employees = spark.read.csv("datasets/csv/employees.csv", header=True, inferSchema=True)
 
 # a) Write as Parquet
-employees.write.mode("overwrite").parquet("../datasets/parquet/employees")
+employees.write.mode("overwrite").parquet("/tmp/parquet/employees")
+print("Written as Parquet!")
+
+# COMMAND ----------
 
 # b) Read with column pruning (automatic - just select columns)
-df = spark.read.parquet("../datasets/parquet/employees").select("name", "salary")
-df.show()
+df = spark.read.parquet("/tmp/parquet/employees").select("name", "salary")
+display(df)
+
+# COMMAND ----------
 
 # c) Write with partitioning
-employees.write.mode("overwrite").partitionBy("department").parquet("../datasets/parquet/employees_partitioned")
+employees.write.mode("overwrite").partitionBy("department").parquet("/tmp/parquet/employees_partitioned")
+print("Written with partitioning!")
+
+# COMMAND ----------
 
 # d) Write with compression
 employees.write \
     .mode("overwrite") \
     .option("compression", "snappy") \
-    .parquet("../datasets/parquet/employees_snappy")
+    .parquet("/tmp/parquet/employees_snappy")
+print("Written with snappy compression!")
 
-# Other compression: gzip, lz4, zstd
+# COMMAND ----------
 
-# e) Merge schema from multiple files
-df = spark.read.option("mergeSchema", True).parquet("../datasets/parquet/employees_partitioned")
+# MAGIC %md
+# MAGIC ### Compression Options:
+# MAGIC - **snappy** (default): Good balance of speed and compression
+# MAGIC - **gzip**: Better compression, slower
+# MAGIC - **lz4**: Fast compression
+# MAGIC - **zstd**: Good compression ratio
 
+# COMMAND ----------
 
-# =============================================================================
-# Problem 4: Schema Evolution
-# =============================================================================
-# a) Read files with different schemas
-df = spark.read.option("mergeSchema", True).parquet("path/to/files/")
+# MAGIC %md
+# MAGIC ## Problem 4: Schema Evolution
 
-# b) Handle missing columns - use coalesce with default
+# COMMAND ----------
+
+# a) Read files with different schemas using mergeSchema
+df = spark.read.option("mergeSchema", "true").parquet("/tmp/parquet/employees_partitioned")
+df.printSchema()
+
+# COMMAND ----------
+
+# b) Handle missing columns with coalesce
 from pyspark.sql.functions import coalesce, lit
 
-df = df.withColumn("new_column", coalesce(col("new_column"), lit("default")))
+df = df.withColumn("new_column", coalesce(col("bonus"), lit(0.0)))
+display(df)
 
-# c) Handle new columns
-# When writing, new columns are added automatically with mergeSchema
+# COMMAND ----------
 
-# d) Schema enforcement vs evolution
-# Enforcement: Fail if schema doesn't match
-df = spark.read.schema(explicit_schema).parquet("path")
+# MAGIC %md
+# MAGIC ## Problem 5: Partitioning
 
-# Evolution: Allow schema changes
-df = spark.read.option("mergeSchema", True).parquet("path")
+# COMMAND ----------
 
-
-# =============================================================================
-# Problem 5: Partitioning
-# =============================================================================
 # a) Single column partition
-employees.write.mode("overwrite").partitionBy("department").parquet("../datasets/parquet/by_dept")
+employees.write.mode("overwrite").partitionBy("department").parquet("/tmp/parquet/by_dept")
+print("Partitioned by department!")
+
+# COMMAND ----------
 
 # b) Multiple column partition
-employees.write.mode("overwrite").partitionBy("department", "city").parquet("../datasets/parquet/by_dept_city")
+employees.write.mode("overwrite").partitionBy("department", "city").parquet("/tmp/parquet/by_dept_city")
+print("Partitioned by department and city!")
+
+# COMMAND ----------
 
 # c) Read specific partitions (partition pruning)
-df = spark.read.parquet("../datasets/parquet/by_dept") \
+df = spark.read.parquet("/tmp/parquet/by_dept") \
     .filter(col("department") == "Engineering")
 
 # Verify partition pruning in explain
 df.explain()
 
-# d) Dynamic partition overwrite
-spark.conf.set("spark.sql.sources.partitionOverwriteMode", "dynamic")
-employees.write.mode("overwrite").partitionBy("department").parquet("path")
+# COMMAND ----------
 
-# e) Partition pruning happens automatically when filtering on partition columns
+# MAGIC %md
+# MAGIC ## Problem 6: Complex Data Types
 
+# COMMAND ----------
 
-# =============================================================================
-# Problem 6: Complex Data Types
-# =============================================================================
+# Read orders with complex types
+orders = spark.read.json("datasets/json/orders.json")
+
 # a) Arrays
-schema_with_array = StructType([
-    StructField("id", IntegerType()),
-    StructField("tags", ArrayType(StringType()))
-])
+display(orders.select("order_id", "items"))
+
+# COMMAND ----------
 
 # b) Nested structs
-schema_with_struct = StructType([
-    StructField("id", IntegerType()),
-    StructField("address", StructType([
-        StructField("street", StringType()),
-        StructField("city", StringType()),
-        StructField("zip", StringType())
-    ]))
-])
+display(orders.select("order_id", "shipping", "shipping.city", "shipping.state"))
 
-# c) Maps
-schema_with_map = StructType([
-    StructField("id", IntegerType()),
-    StructField("properties", MapType(StringType(), StringType()))
-])
+# COMMAND ----------
 
-# d) Read/write complex types
-orders = spark.read.json("../datasets/json/orders.json")
-orders.write.mode("overwrite").parquet("../datasets/parquet/orders_complex")
+# c) Write complex types to Parquet
+orders.write.mode("overwrite").parquet("/tmp/parquet/orders_complex")
 
 # Read back
-df = spark.read.parquet("../datasets/parquet/orders_complex")
+df = spark.read.parquet("/tmp/parquet/orders_complex")
 df.printSchema()
 
+# COMMAND ----------
 
-# =============================================================================
-# Problem 7: Compression
-# =============================================================================
-employees = spark.read.csv("../datasets/csv/employees.csv", header=True, inferSchema=True)
+# MAGIC %md
+# MAGIC ## Problem 7: Compression Comparison
+
+# COMMAND ----------
 
 # a) Snappy (default, good balance)
-employees.write.mode("overwrite") \
-    .option("compression", "snappy") \
-    .parquet("../datasets/parquet/emp_snappy")
+employees.write.mode("overwrite").option("compression", "snappy").parquet("/tmp/parquet/emp_snappy")
 
 # b) Gzip (better compression, slower)
-employees.write.mode("overwrite") \
-    .option("compression", "gzip") \
-    .parquet("../datasets/parquet/emp_gzip")
+employees.write.mode("overwrite").option("compression", "gzip").parquet("/tmp/parquet/emp_gzip")
 
-# c) Compare file sizes (conceptual)
-import os
+# c) No compression
+employees.write.mode("overwrite").option("compression", "none").parquet("/tmp/parquet/emp_none")
 
-# snappy_size = os.path.getsize("../datasets/parquet/emp_snappy")
-# gzip_size = os.path.getsize("../datasets/parquet/emp_gzip")
+print("Written with different compressions!")
 
-# d) Read compressed files (automatic detection)
-df = spark.read.parquet("../datasets/parquet/emp_snappy")
+# COMMAND ----------
 
+# MAGIC %md
+# MAGIC ## Problem 8: ORC Format
 
-# =============================================================================
-# Problem 8: ORC Format
-# =============================================================================
+# COMMAND ----------
+
 # a) Write as ORC
-employees.write.mode("overwrite").orc("../datasets/orc/employees")
+employees.write.mode("overwrite").orc("/tmp/orc/employees")
+print("Written as ORC!")
+
+# COMMAND ----------
 
 # b) Read ORC
-df = spark.read.orc("../datasets/orc/employees")
-df.show()
+df = spark.read.orc("/tmp/orc/employees")
+display(df)
 
-# c) Parquet vs ORC
-# - Parquet: Better for nested data, wider ecosystem
-# - ORC: Better for Hive integration, ACID support
-# Both support predicate pushdown and columnar storage
+# COMMAND ----------
 
-# d) ORC-specific options
-employees.write.mode("overwrite") \
-    .option("compression", "zlib") \
-    .option("orc.bloom.filter.columns", "name") \
-    .orc("../datasets/orc/employees_optimized")
+# MAGIC %md
+# MAGIC ### Parquet vs ORC:
+# MAGIC - **Parquet**: Better for nested data, wider ecosystem support
+# MAGIC - **ORC**: Better Hive integration, native ACID support
+# MAGIC - Both support predicate pushdown and columnar storage
 
+# COMMAND ----------
 
-# =============================================================================
-# Problem 9: Text and Binary Files
-# =============================================================================
+# MAGIC %md
+# MAGIC ## Problem 9: Text Files
+
+# COMMAND ----------
+
 # a) Plain text files
-text_df = spark.read.text("../datasets/csv/employees.csv")
-text_df.show(5, truncate=False)
+text_df = spark.read.text("datasets/csv/employees.csv")
+display(text_df.limit(5))
 
-# b) Line by line processing
-lines = spark.read.text("../datasets/csv/employees.csv")
-lines.show()
+# COMMAND ----------
 
 # c) Whole text file as single row
-whole_text = spark.read.option("wholetext", True).text("../datasets/csv/employees.csv")
-whole_text.show(truncate=False)
+whole_text = spark.read.option("wholetext", True).text("datasets/csv/employees.csv")
+display(whole_text)
 
-# d) Binary files
-# binary_df = spark.read.format("binaryFile").load("path/to/binary/files")
+# COMMAND ----------
 
+# MAGIC %md
+# MAGIC ## Problem 10: Delta Lake
 
-# =============================================================================
-# Problem 10: Delta Lake (if available)
-# =============================================================================
-# Note: Requires delta-spark package
+# COMMAND ----------
 
-try:
-    # a) Write as Delta table
-    employees.write.mode("overwrite").format("delta").save("../datasets/delta/employees")
+# a) Write as Delta table
+employees.write.format("delta").mode("overwrite").save("/tmp/delta/employees")
+print("Written as Delta!")
 
-    # b) Read Delta table
-    df = spark.read.format("delta").load("../datasets/delta/employees")
-    df.show()
+# COMMAND ----------
 
-    # c) Time travel
-    # By version
-    df_v0 = spark.read.format("delta").option("versionAsOf", 0).load("../datasets/delta/employees")
+# b) Read Delta table
+df = spark.read.format("delta").load("/tmp/delta/employees")
+display(df)
 
-    # By timestamp
-    # df_ts = spark.read.format("delta").option("timestampAsOf", "2024-01-01").load(path)
+# COMMAND ----------
 
-    # d) MERGE/UPSERT
-    from delta.tables import DeltaTable
+# c) Time travel - query by version
+df_v0 = spark.read.format("delta").option("versionAsOf", 0).load("/tmp/delta/employees")
+display(df_v0)
 
-    delta_table = DeltaTable.forPath(spark, "../datasets/delta/employees")
+# COMMAND ----------
 
-    # delta_table.alias("target").merge(
-    #     updates.alias("source"),
-    #     "target.emp_id = source.emp_id"
-    # ).whenMatchedUpdate(set={"salary": "source.salary"}) \
-    #  .whenNotMatchedInsert(values={"emp_id": "source.emp_id", "name": "source.name"}) \
-    #  .execute()
+# MAGIC %md
+# MAGIC ## Problem 11: File Metadata
 
-    # e) Schema evolution
-    spark.conf.set("spark.databricks.delta.schema.autoMerge.enabled", "true")
+# COMMAND ----------
 
-except Exception as e:
-    print(f"Delta Lake not available: {e}")
-
-
-# =============================================================================
-# Problem 11: File Metadata
-# =============================================================================
-# a) Input file name
-df = spark.read.csv("../datasets/csv/employees.csv", header=True) \
+# a) Get input file name for each record
+df = spark.read.csv("datasets/csv/employees.csv", header=True) \
     .withColumn("source_file", input_file_name())
-df.select("name", "source_file").show(truncate=False)
+display(df.select("name", "source_file"))
 
-# b) File modification time (available in Spark 3.0+)
-# df = spark.read.format("binaryFile").load("path").select("modificationTime")
+# COMMAND ----------
 
-# c) Process multiple files with different schemas
-# Use mergeSchema option or process files separately
+# MAGIC %md
+# MAGIC ## Problem 12: Performance Considerations
 
+# COMMAND ----------
 
-# =============================================================================
-# Problem 12: Performance Considerations
-# =============================================================================
-# a) Optimal file format
-# - Parquet for analytics workloads (columnar, compression)
-# - Delta for ACID, time travel, updates
-# - Avro for row-based, schema evolution
-
-# b) Optimal partition size: 128MB - 1GB per partition
-# Check partition count
-df = spark.read.parquet("../datasets/parquet/employees")
+# a) Check partition count
+df = spark.read.parquet("/tmp/parquet/employees")
 print(f"Partitions: {df.rdd.getNumPartitions()}")
 
+# COMMAND ----------
+
 # c) Coalesce vs repartition before write
+
 # Coalesce: reduces partitions, avoids shuffle
+employees.coalesce(1).write.mode("overwrite").parquet("/tmp/parquet/emp_single")
+print("Coalesced to 1 file!")
+
 # Repartition: can increase/decrease, causes shuffle
+employees.repartition(4).write.mode("overwrite").parquet("/tmp/parquet/emp_four")
+print("Repartitioned to 4 files!")
 
-employees.coalesce(1).write.mode("overwrite").parquet("../datasets/parquet/emp_single")
-employees.repartition(4).write.mode("overwrite").parquet("../datasets/parquet/emp_four")
+# COMMAND ----------
 
-# d) File statistics and pruning
-# Parquet stores min/max statistics per column per row group
-# This enables data skipping
+# MAGIC %md
+# MAGIC ## Problem 13: Error Handling
 
+# COMMAND ----------
 
-# =============================================================================
-# Problem 13: Error Handling
-# =============================================================================
 # a) Corrupt record handling modes
-# PERMISSIVE (default): Nulls for corrupt fields, adds _corrupt_record column
-# DROPMALFORMED: Drops corrupt records
-# FAILFAST: Fails immediately
 
-df = spark.read \
+# PERMISSIVE (default) - nulls for corrupt fields
+df_permissive = spark.read \
     .option("mode", "PERMISSIVE") \
     .option("columnNameOfCorruptRecord", "_corrupt") \
-    .csv("../datasets/csv/employees.csv", header=True)
+    .csv("datasets/csv/employees.csv", header=True)
 
-# b) Bad records path
-df = spark.read \
-    .option("badRecordsPath", "../output/bad_records") \
-    .csv("../datasets/csv/employees.csv", header=True)
+display(df_permissive)
 
-# c) Column name sanitization
-# Spark 3.0+ automatically handles special characters
-df = spark.read.option("header", True) \
-    .option("enforceSchema", False) \
-    .csv("path/to/file.csv")
+# COMMAND ----------
+
+# DROPMALFORMED - drops corrupt records
+df_drop = spark.read \
+    .option("mode", "DROPMALFORMED") \
+    .csv("datasets/csv/employees.csv", header=True)
+
+display(df_drop)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Error Handling Modes Summary:
+# MAGIC | Mode | Behavior |
+# MAGIC |------|----------|
+# MAGIC | PERMISSIVE | Sets null for corrupt fields, optionally stores in _corrupt_record |
+# MAGIC | DROPMALFORMED | Silently drops corrupt records |
+# MAGIC | FAILFAST | Throws exception immediately |

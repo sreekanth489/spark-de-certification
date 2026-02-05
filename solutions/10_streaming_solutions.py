@@ -1,9 +1,15 @@
-"""
-Structured Streaming - Solutions
-=================================
-"""
+# Databricks notebook source
+# MAGIC %md
+# MAGIC # Structured Streaming - Solutions
+# MAGIC Topics: Sources, sinks, triggers, windows, watermarks, state management
 
-from pyspark.sql import SparkSession
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Setup
+
+# COMMAND ----------
+
 from pyspark.sql.functions import (
     col, window, from_json, to_json, current_timestamp,
     expr, sum, count, avg, max, min, explode, split,
@@ -14,14 +20,13 @@ from pyspark.sql.types import (
     TimestampType, DoubleType, ArrayType
 )
 
-spark = SparkSession.builder \
-    .appName("Streaming Solutions") \
-    .config("spark.sql.adaptive.enabled", "true") \
-    .getOrCreate()
+# COMMAND ----------
 
-# =============================================================================
-# Problem 1: Reading from Sources
-# =============================================================================
+# MAGIC %md
+# MAGIC ## Problem 1: Reading from Sources
+
+# COMMAND ----------
+
 # a) Rate source (for testing) - generates rows per second
 rate_df = spark.readStream \
     .format("rate") \
@@ -29,8 +34,12 @@ rate_df = spark.readStream \
     .load()
 
 # Rate source schema: timestamp, value
+print("Rate source schema:")
+rate_df.printSchema()
 
-# b) CSV directory (file source)
+# COMMAND ----------
+
+# b) CSV directory schema (for file source)
 csv_schema = StructType([
     StructField("id", IntegerType()),
     StructField("name", StringType()),
@@ -43,7 +52,11 @@ csv_schema = StructType([
 #     .option("header", True) \
 #     .csv("path/to/csv/dir")
 
-# c) JSON directory
+print("CSV schema defined!")
+
+# COMMAND ----------
+
+# c) JSON directory schema
 json_schema = StructType([
     StructField("event_id", StringType()),
     StructField("event_type", StringType()),
@@ -55,15 +68,15 @@ json_schema = StructType([
 #     .schema(json_schema) \
 #     .json("path/to/json/dir")
 
-# d) Parquet directory
-# parquet_stream = spark.readStream \
-#     .schema(parquet_schema) \
-#     .parquet("path/to/parquet/dir")
+print("JSON schema defined!")
 
+# COMMAND ----------
 
-# =============================================================================
-# Problem 2: Basic Streaming Operations
-# =============================================================================
+# MAGIC %md
+# MAGIC ## Problem 2: Basic Streaming Operations
+
+# COMMAND ----------
+
 # Using rate source for demonstration
 rate_df = spark.readStream \
     .format("rate") \
@@ -89,26 +102,20 @@ with_computed = rate_df.withColumn(
     expr("CASE WHEN value > 50 THEN 'high' ELSE 'low' END")
 )
 
-# d) Aggregate (requires output mode complete or update)
-# counted = rate_df.groupBy(
-#     window(col("timestamp"), "10 seconds")
-# ).count()
+print("Streaming transformations defined!")
 
+# COMMAND ----------
 
-# =============================================================================
-# Problem 3: Output Modes
-# =============================================================================
-# a) Append mode - new rows only (default)
-# - Use with: non-aggregation queries, aggregations with watermark
-# - Cannot use with: aggregations without watermark
+# MAGIC %md
+# MAGIC ## Problem 3: Output Modes
+# MAGIC
+# MAGIC | Mode | Description | Use Cases |
+# MAGIC |------|-------------|-----------|
+# MAGIC | **Append** | New rows only (default) | Non-aggregation queries, aggregations with watermark |
+# MAGIC | **Complete** | All rows | Aggregations |
+# MAGIC | **Update** | Only updated rows | Aggregations (outputs only changed aggregates) |
 
-# b) Complete mode - all rows
-# - Use with: aggregations
-# - Cannot use with: non-aggregation queries, queries with limits
-
-# c) Update mode - only updated rows
-# - Use with: aggregations (outputs only changed aggregates)
-# - Cannot use with: sorting, queries needing complete results
+# COMMAND ----------
 
 # Example aggregation with complete mode
 # query = rate_df.groupBy(window("timestamp", "10 seconds")) \
@@ -118,10 +125,15 @@ with_computed = rate_df.withColumn(
 #     .format("console") \
 #     .start()
 
+print("Output modes explained!")
 
-# =============================================================================
-# Problem 4: Writing to Sinks
-# =============================================================================
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Problem 4: Writing to Sinks
+
+# COMMAND ----------
+
 # a) Console sink (debugging)
 # query = rate_df.writeStream \
 #     .format("console") \
@@ -135,8 +147,6 @@ with_computed = rate_df.withColumn(
 #     .queryName("rate_table") \
 #     .outputMode("append") \
 #     .start()
-#
-# # Query the in-memory table
 # spark.sql("SELECT * FROM rate_table").show()
 
 # c) File sink (Parquet)
@@ -147,13 +157,13 @@ with_computed = rate_df.withColumn(
 #     .outputMode("append") \
 #     .start()
 
+print("Sink examples defined!")
+
+# COMMAND ----------
+
 # d) Foreach sink (custom processing)
 def process_row(row):
     print(f"Processing: {row}")
-
-# query = rate_df.writeStream \
-#     .foreach(process_row) \
-#     .start()
 
 # ForeachBatch for batch processing
 def process_batch(df, batch_id):
@@ -164,10 +174,15 @@ def process_batch(df, batch_id):
 #     .foreachBatch(process_batch) \
 #     .start()
 
+print("ForeachBatch defined!")
 
-# =============================================================================
-# Problem 5: Triggers
-# =============================================================================
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Problem 5: Triggers
+
+# COMMAND ----------
+
 from pyspark.sql.streaming import Trigger
 
 # a) Default - process as fast as possible
@@ -185,16 +200,15 @@ from pyspark.sql.streaming import Trigger
 # .trigger(Trigger.AvailableNow())
 # .trigger(availableNow=True)
 
-# Example with trigger
-# query = rate_df.writeStream \
-#     .format("console") \
-#     .trigger(processingTime="5 seconds") \
-#     .start()
+print("Trigger options explained!")
 
+# COMMAND ----------
 
-# =============================================================================
-# Problem 6: Windowed Aggregations
-# =============================================================================
+# MAGIC %md
+# MAGIC ## Problem 6: Windowed Aggregations
+
+# COMMAND ----------
+
 # a) Tumbling window (non-overlapping)
 tumbling = rate_df.groupBy(
     window(col("timestamp"), "10 seconds")
@@ -203,23 +217,27 @@ tumbling = rate_df.groupBy(
     sum("value").alias("total")
 )
 
+print("Tumbling window defined!")
+tumbling.printSchema()
+
+# COMMAND ----------
+
 # b) Sliding window (overlapping)
 # Window of 10 seconds, sliding every 5 seconds
 sliding = rate_df.groupBy(
     window(col("timestamp"), "10 seconds", "5 seconds")
 ).count()
 
-# c) Session window (Spark 3.2+)
-# session = rate_df.groupBy(
-#     session_window(col("timestamp"), "5 minutes")
-# ).count()
+print("Sliding window defined!")
+sliding.printSchema()
 
-# d) Window with watermark (see Problem 7)
+# COMMAND ----------
 
+# MAGIC %md
+# MAGIC ## Problem 7: Watermarks
 
-# =============================================================================
-# Problem 7: Watermarks
-# =============================================================================
+# COMMAND ----------
+
 # a) Define watermark for late data
 windowed_with_watermark = rate_df \
     .withWatermark("timestamp", "10 minutes") \
@@ -227,24 +245,24 @@ windowed_with_watermark = rate_df \
         window(col("timestamp"), "5 minutes")
     ).count()
 
-# b) Watermark threshold meaning:
-# - Events arriving more than 10 minutes late are dropped
-# - State for windows older than watermark is cleaned up
+print("Watermark defined!")
 
-# c) Watermark behavior:
-# - Watermark = max event time seen - threshold
-# - Data older than watermark may be dropped (in append mode)
-# - State older than watermark is eventually cleaned
+# COMMAND ----------
 
-# d) Handling late data:
-# - Increase watermark threshold for more tolerance
-# - Use update mode to update aggregates as late data arrives
-# - Output late data to separate location for analysis
+# MAGIC %md
+# MAGIC ### Watermark Behavior:
+# MAGIC - **Watermark** = max event time seen - threshold
+# MAGIC - Events arriving more than threshold late are dropped
+# MAGIC - State for windows older than watermark is cleaned up
+# MAGIC - Data older than watermark may be dropped (in append mode)
 
+# COMMAND ----------
 
-# =============================================================================
-# Problem 8: Stateful Operations
-# =============================================================================
+# MAGIC %md
+# MAGIC ## Problem 8: Stateful Operations
+
+# COMMAND ----------
+
 # a) Streaming aggregations (automatic state management)
 # State is maintained for each group key
 agg = rate_df.groupBy(
@@ -254,24 +272,31 @@ agg = rate_df.groupBy(
     sum("value").alias("sum")
 )
 
+print("Stateful aggregation defined!")
+
+# COMMAND ----------
+
 # b) Streaming deduplication
 # dedupe = stream_df \
 #     .withWatermark("timestamp", "10 seconds") \
 #     .dropDuplicates(["id", "timestamp"])
 
-# c) Stream-stream joins (see Problem 10)
-
-# d) State management
+# State management:
 # - State stored in checkpoints
 # - Automatically cleaned up based on watermarks
 # - Use flatMapGroupsWithState for custom state logic
 
+print("Deduplication explained!")
 
-# =============================================================================
-# Problem 9: Stream-Static Joins
-# =============================================================================
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Problem 9: Stream-Static Joins
+
+# COMMAND ----------
+
 # Load static dimension table
-products = spark.read.csv("../datasets/csv/products.csv", header=True, inferSchema=True)
+products = spark.read.csv("datasets/csv/products.csv", header=True, inferSchema=True)
 
 # a) Join streaming with static
 # enriched = streaming_sales.join(
@@ -282,18 +307,22 @@ products = spark.read.csv("../datasets/csv/products.csv", header=True, inferSche
 # b) Use case: Enrich events with dimension data
 # events.join(broadcast(dim_table), "key")
 
-# c) Considerations:
-# - Static table is read once at start (use broadcast for small tables)
-# - To refresh static data, restart query or use foreachBatch
-# - Inner, left outer (stream left), right outer (stream right) supported
+print("Stream-static join explained!")
 
+# COMMAND ----------
 
-# =============================================================================
-# Problem 10: Stream-Stream Joins
-# =============================================================================
-# Create two streams for demonstration
-# left_stream = spark.readStream.format("rate").option("rowsPerSecond", 5).load()
-# right_stream = spark.readStream.format("rate").option("rowsPerSecond", 5).load()
+# MAGIC %md
+# MAGIC ### Stream-Static Join Considerations:
+# MAGIC - Static table is read once at start (use broadcast for small tables)
+# MAGIC - To refresh static data, restart query or use foreachBatch
+# MAGIC - Inner, left outer (stream left), right outer (stream right) supported
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Problem 10: Stream-Stream Joins
+
+# COMMAND ----------
 
 # a) Inner join with watermarks
 # joined = left_stream \
@@ -308,23 +337,19 @@ products = spark.read.csv("../datasets/csv/products.csv", header=True, inferSche
 #         "inner"
 #     )
 
-# b) Left outer join (requires watermark on right)
-# left_outer = left_stream \
-#     .withWatermark("timestamp", "10 minutes") \
-#     .join(
-#         right_stream.withWatermark("timestamp", "10 minutes"),
-#         "value",
-#         "leftOuter"
-#     )
-
-# c) Time-based constraints required for:
+# Time-based constraints required for:
 # - Outer joins
 # - State cleanup
 
+print("Stream-stream join explained!")
 
-# =============================================================================
-# Problem 11: Checkpointing
-# =============================================================================
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Problem 11: Checkpointing
+
+# COMMAND ----------
+
 # a) Configure checkpoint location
 # query = stream_df.writeStream \
 #     .format("parquet") \
@@ -332,59 +357,50 @@ products = spark.read.csv("../datasets/csv/products.csv", header=True, inferSche
 #     .option("checkpointLocation", "checkpoints/query1") \
 #     .start()
 
-# b) Checkpoint contents:
-# - offsets/: Input offsets processed
-# - commits/: Completed batch metadata
-# - state/: Stateful operation state
+print("Checkpoint configuration explained!")
 
-# c) Recovery from checkpoint:
-# - Query automatically resumes from last checkpoint
-# - Same checkpoint location must be used
-# - Query logic changes may require new checkpoint
+# COMMAND ----------
 
-# d) Checkpoint cleanup:
-# - Automatic based on watermarks
-# - Manual cleanup not recommended during query execution
+# MAGIC %md
+# MAGIC ### Checkpoint Contents:
+# MAGIC - **offsets/**: Input offsets processed
+# MAGIC - **commits/**: Completed batch metadata
+# MAGIC - **state/**: Stateful operation state
+# MAGIC
+# MAGIC ### Recovery:
+# MAGIC - Query automatically resumes from last checkpoint
+# MAGIC - Same checkpoint location must be used
+# MAGIC - Query logic changes may require new checkpoint
 
+# COMMAND ----------
 
-# =============================================================================
-# Problem 12: Schema Evolution
-# =============================================================================
-# a) New columns in source
-# - Use schema with nullable new columns
-# - Or use schema evolution options
+# MAGIC %md
+# MAGIC ## Problem 12: Monitoring
 
-# b) Schema enforcement
-# schema = StructType([...])
-# stream = spark.readStream.schema(schema).json("path")
+# COMMAND ----------
 
-# c) Options for changes:
-# - Add new optional columns to schema
-# - Use mergeSchema for Parquet/Delta
-# - Version your schemas
-
-
-# =============================================================================
-# Problem 13: Monitoring
-# =============================================================================
 # a) Query progress
 # query.status  # Current status
 # query.lastProgress  # Last micro-batch progress
 # query.recentProgress  # Recent progress
 
 # Example progress info:
-# {
-#   "id": "query-uuid",
-#   "runId": "run-uuid",
-#   "batchId": 10,
-#   "numInputRows": 100,
-#   "inputRowsPerSecond": 50.0,
-#   "processedRowsPerSecond": 100.0,
-#   "durationMs": {...},
-#   "stateOperators": [...],
-#   "sources": [...],
-#   "sink": {...}
-# }
+progress_info = {
+    "id": "query-uuid",
+    "runId": "run-uuid",
+    "batchId": 10,
+    "numInputRows": 100,
+    "inputRowsPerSecond": 50.0,
+    "processedRowsPerSecond": 100.0,
+    "durationMs": {},
+    "stateOperators": [],
+    "sources": [],
+    "sink": {}
+}
+
+print("Progress monitoring explained!")
+
+# COMMAND ----------
 
 # b) StreamingQueryListener
 from pyspark.sql.streaming import StreamingQueryListener
@@ -401,14 +417,15 @@ class MyListener(StreamingQueryListener):
 
 # spark.streams.addListener(MyListener())
 
-# c) Metrics
-# Available in Spark UI under Streaming tab
-# Or via REST API: /api/v1/applications/{app-id}/streaming/statistics
+print("StreamingQueryListener defined!")
 
+# COMMAND ----------
 
-# =============================================================================
-# Problem 14: Kafka Integration
-# =============================================================================
+# MAGIC %md
+# MAGIC ## Problem 13: Kafka Integration
+
+# COMMAND ----------
+
 # a) Read from Kafka
 # kafka_df = spark.readStream \
 #     .format("kafka") \
@@ -420,6 +437,10 @@ class MyListener(StreamingQueryListener):
 # Kafka DataFrame schema:
 # key (binary), value (binary), topic, partition, offset, timestamp, timestampType
 
+print("Kafka read explained!")
+
+# COMMAND ----------
+
 # b) Write to Kafka
 # query = df.selectExpr("CAST(id AS STRING) AS key", "to_json(struct(*)) AS value") \
 #     .writeStream \
@@ -429,14 +450,7 @@ class MyListener(StreamingQueryListener):
 #     .option("checkpointLocation", "checkpoints/kafka") \
 #     .start()
 
-# c) Handle key-value pairs
-# parsed = kafka_df.select(
-#     col("key").cast("string"),
-#     col("value").cast("string"),
-#     col("timestamp")
-# )
-
-# d) Deserialize JSON from Kafka
+# c) Deserialize JSON from Kafka
 event_schema = StructType([
     StructField("event_id", StringType()),
     StructField("user_id", StringType()),
@@ -447,10 +461,15 @@ event_schema = StructType([
 #     from_json(col("value").cast("string"), event_schema).alias("data")
 # ).select("data.*")
 
+print("Kafka write and parse explained!")
 
-# =============================================================================
-# Problem 15: Practical Streaming Pipeline
-# =============================================================================
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Problem 14: Practical Streaming Pipeline
+
+# COMMAND ----------
+
 # Complete streaming pipeline example
 
 # 1. Read from source
@@ -476,24 +495,33 @@ aggregated = transformed \
         avg("value").alias("average")
     )
 
-# 4. Write to sink with checkpointing
+print("Complete pipeline defined!")
+aggregated.printSchema()
+
+# COMMAND ----------
+
+# 4. Write to sink with checkpointing (console for demo)
 # query = aggregated.writeStream \
-#     .format("parquet") \
-#     .option("path", "output/streaming_results") \
-#     .option("checkpointLocation", "checkpoints/pipeline") \
-#     .outputMode("append") \
-#     .trigger(processingTime="30 seconds") \
+#     .format("console") \
+#     .outputMode("complete") \
+#     .trigger(processingTime="10 seconds") \
 #     .start()
 
 # 5. Monitor
-# query.awaitTermination()
-
-# For console testing:
-query = aggregated.writeStream \
-    .format("console") \
-    .outputMode("complete") \
-    .trigger(processingTime="10 seconds") \
-    .start()
-
 # query.awaitTermination(30)  # Run for 30 seconds
 # query.stop()
+
+print("Pipeline write configured!")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Streaming Summary
+# MAGIC
+# MAGIC | Component | Options |
+# MAGIC |-----------|---------|
+# MAGIC | **Sources** | Rate, File (CSV/JSON/Parquet), Kafka, Delta |
+# MAGIC | **Sinks** | Console, Memory, File, Kafka, Delta, ForeachBatch |
+# MAGIC | **Triggers** | ProcessingTime, Once, AvailableNow |
+# MAGIC | **Output Modes** | Append, Complete, Update |
+# MAGIC | **Windows** | Tumbling, Sliding, Session |

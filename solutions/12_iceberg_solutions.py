@@ -1,510 +1,554 @@
-"""
-Apache Iceberg - Solutions
-===========================
-"""
+# Databricks notebook source
+# MAGIC %md
+# MAGIC # Apache Iceberg - Solutions
+# MAGIC Topics: Tables, CRUD, hidden partitioning, time travel, schema evolution, maintenance
 
-from pyspark.sql import SparkSession
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Setup
+
+# COMMAND ----------
+
 from pyspark.sql.functions import col, lit, current_timestamp, expr, year, month, dayofmonth
 
-# Initialize Spark with Iceberg
-spark = SparkSession.builder \
-    .appName("Iceberg Solutions") \
-    .config("spark.sql.extensions", "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions") \
-    .config("spark.sql.catalog.spark_catalog", "org.apache.iceberg.spark.SparkSessionCatalog") \
-    .config("spark.sql.catalog.spark_catalog.type", "hive") \
-    .config("spark.sql.catalog.local", "org.apache.iceberg.spark.SparkCatalog") \
-    .config("spark.sql.catalog.local.type", "hadoop") \
-    .config("spark.sql.catalog.local.warehouse", "../datasets/iceberg-warehouse") \
-    .getOrCreate()
+# Note: Iceberg requires specific configurations
+# spark.conf.set("spark.sql.extensions", "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions")
+# spark.conf.set("spark.sql.catalog.local", "org.apache.iceberg.spark.SparkCatalog")
+# spark.conf.set("spark.sql.catalog.local.type", "hadoop")
+# spark.conf.set("spark.sql.catalog.local.warehouse", "datasets/iceberg-warehouse")
 
-employees = spark.read.csv("../datasets/csv/employees.csv", header=True, inferSchema=True)
+employees = spark.read.csv("datasets/csv/employees.csv", header=True, inferSchema=True)
+display(employees)
 
-# =============================================================================
-# Problem 1: Creating Iceberg Tables
-# =============================================================================
-# a) Create using SQL
-spark.sql("""
-    CREATE TABLE IF NOT EXISTS local.db.employees (
-        emp_id INT,
-        name STRING,
-        department STRING,
-        salary DOUBLE,
-        hire_date DATE,
-        manager_id INT,
-        city STRING
-    )
-    USING iceberg
-""")
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Problem 1: Creating Iceberg Tables
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC -- a) Create using SQL
+# MAGIC CREATE TABLE IF NOT EXISTS local.db.employees (
+# MAGIC     emp_id INT,
+# MAGIC     name STRING,
+# MAGIC     department STRING,
+# MAGIC     salary DOUBLE,
+# MAGIC     hire_date DATE,
+# MAGIC     manager_id INT,
+# MAGIC     city STRING
+# MAGIC )
+# MAGIC USING iceberg
+
+# COMMAND ----------
 
 # b) Create from DataFrame
-employees.writeTo("local.db.employees_df").using("iceberg").createOrReplace()
+# employees.writeTo("local.db.employees_df").using("iceberg").createOrReplace()
 
-# c) Convert existing table (migrate procedure)
-# CALL local.system.migrate('db.existing_table')
-# Or snapshot existing table
-# CALL local.system.snapshot('db.source', 'db.target')
+print("Iceberg table creation methods explained!")
 
-# d) Specific file format
-spark.sql("""
-    CREATE TABLE local.db.employees_orc (
-        emp_id INT,
-        name STRING,
-        salary DOUBLE
-    )
-    USING iceberg
-    TBLPROPERTIES (
-        'write.format.default' = 'orc'
-    )
-""")
+# COMMAND ----------
 
+# MAGIC %sql
+# MAGIC -- d) Specific file format (ORC)
+# MAGIC CREATE TABLE local.db.employees_orc (
+# MAGIC     emp_id INT,
+# MAGIC     name STRING,
+# MAGIC     salary DOUBLE
+# MAGIC )
+# MAGIC USING iceberg
+# MAGIC TBLPROPERTIES (
+# MAGIC     'write.format.default' = 'orc'
+# MAGIC )
 
-# =============================================================================
-# Problem 2: Basic CRUD Operations
-# =============================================================================
-# a) INSERT
-spark.sql("INSERT INTO local.db.employees VALUES (1, 'John', 'Eng', 80000, DATE '2020-01-15', NULL, 'NYC')")
+# COMMAND ----------
 
-# INSERT from DataFrame
-employees.writeTo("local.db.employees").append()
+# MAGIC %md
+# MAGIC ## Problem 2: Basic CRUD Operations
 
-# b) UPDATE
-spark.sql("""
-    UPDATE local.db.employees
-    SET salary = salary * 1.10
-    WHERE department = 'Eng'
-""")
+# COMMAND ----------
 
-# c) DELETE
-spark.sql("""
-    DELETE FROM local.db.employees
-    WHERE emp_id = 1
-""")
+# MAGIC %sql
+# MAGIC -- a) INSERT
+# MAGIC INSERT INTO local.db.employees VALUES (1, 'John', 'Eng', 80000, DATE '2020-01-15', NULL, 'NYC')
 
-# d) MERGE
-spark.sql("""
-    MERGE INTO local.db.employees t
-    USING updates s
-    ON t.emp_id = s.emp_id
-    WHEN MATCHED THEN UPDATE SET *
-    WHEN NOT MATCHED THEN INSERT *
-""")
+# COMMAND ----------
 
+# MAGIC %sql
+# MAGIC -- b) UPDATE
+# MAGIC UPDATE local.db.employees
+# MAGIC SET salary = salary * 1.10
+# MAGIC WHERE department = 'Eng'
 
-# =============================================================================
-# Problem 3: Hidden Partitioning
-# =============================================================================
-# a) Hidden partitioning with date transforms
-spark.sql("""
-    CREATE TABLE local.db.events (
-        event_id STRING,
-        event_time TIMESTAMP,
-        event_type STRING,
-        payload STRING
-    )
-    USING iceberg
-    PARTITIONED BY (year(event_time), month(event_time), day(event_time))
-""")
+# COMMAND ----------
 
-# b) Bucket partitioning
-spark.sql("""
-    CREATE TABLE local.db.users_bucketed (
-        user_id STRING,
-        name STRING,
-        email STRING
-    )
-    USING iceberg
-    PARTITIONED BY (bucket(16, user_id))
-""")
+# MAGIC %sql
+# MAGIC -- c) DELETE
+# MAGIC DELETE FROM local.db.employees
+# MAGIC WHERE emp_id = 1
 
-# c) Truncate partitioning
-spark.sql("""
-    CREATE TABLE local.db.logs (
-        log_id STRING,
-        message STRING,
-        category STRING
-    )
-    USING iceberg
-    PARTITIONED BY (truncate(category, 3))
-""")
+# COMMAND ----------
 
-# d) Partition evolution
-spark.sql("""
-    ALTER TABLE local.db.events
-    ADD PARTITION FIELD hour(event_time)
-""")
+# MAGIC %sql
+# MAGIC -- d) MERGE (upsert)
+# MAGIC MERGE INTO local.db.employees t
+# MAGIC USING updates s
+# MAGIC ON t.emp_id = s.emp_id
+# MAGIC WHEN MATCHED THEN UPDATE SET *
+# MAGIC WHEN NOT MATCHED THEN INSERT *
 
+# COMMAND ----------
 
-# =============================================================================
-# Problem 4: Time Travel
-# =============================================================================
-# a) Query by snapshot ID
-snapshot_id = spark.sql("SELECT snapshot_id FROM local.db.employees.snapshots LIMIT 1").first()[0]
-spark.sql(f"SELECT * FROM local.db.employees VERSION AS OF {snapshot_id}").show()
+# MAGIC %md
+# MAGIC ## Problem 3: Hidden Partitioning
 
-# Or using DataFrame API
-spark.read.option("snapshot-id", snapshot_id).table("local.db.employees").show()
+# COMMAND ----------
 
-# b) Query by timestamp
-spark.sql("""
-    SELECT * FROM local.db.employees TIMESTAMP AS OF '2024-01-15 10:00:00'
-""").show()
+# MAGIC %sql
+# MAGIC -- a) Hidden partitioning with date transforms
+# MAGIC CREATE TABLE local.db.events (
+# MAGIC     event_id STRING,
+# MAGIC     event_time TIMESTAMP,
+# MAGIC     event_type STRING,
+# MAGIC     payload STRING
+# MAGIC )
+# MAGIC USING iceberg
+# MAGIC PARTITIONED BY (year(event_time), month(event_time), day(event_time))
 
-# c) View history
-spark.sql("SELECT * FROM local.db.employees.history").show()
-spark.sql("SELECT * FROM local.db.employees.snapshots").show()
+# COMMAND ----------
 
-# d) Roll back
-spark.sql(f"CALL local.system.rollback_to_snapshot('db.employees', {snapshot_id})")
+# MAGIC %sql
+# MAGIC -- b) Bucket partitioning
+# MAGIC CREATE TABLE local.db.users_bucketed (
+# MAGIC     user_id STRING,
+# MAGIC     name STRING,
+# MAGIC     email STRING
+# MAGIC )
+# MAGIC USING iceberg
+# MAGIC PARTITIONED BY (bucket(16, user_id))
 
-# Or by timestamp
-# CALL local.system.rollback_to_timestamp('db.employees', TIMESTAMP '2024-01-15 10:00:00')
+# COMMAND ----------
 
-# e) Cherry-pick (copy snapshot changes)
-# CALL local.system.cherrypick_snapshot('db.employees', snapshot_id)
+# MAGIC %sql
+# MAGIC -- c) Truncate partitioning
+# MAGIC CREATE TABLE local.db.logs (
+# MAGIC     log_id STRING,
+# MAGIC     message STRING,
+# MAGIC     category STRING
+# MAGIC )
+# MAGIC USING iceberg
+# MAGIC PARTITIONED BY (truncate(category, 3))
 
+# COMMAND ----------
 
-# =============================================================================
-# Problem 5: Schema Evolution
-# =============================================================================
-# a) Add columns
-spark.sql("""
-    ALTER TABLE local.db.employees
-    ADD COLUMNS (
-        bonus DOUBLE,
-        email STRING
-    )
-""")
+# MAGIC %sql
+# MAGIC -- d) Partition evolution - add new partition field
+# MAGIC ALTER TABLE local.db.events
+# MAGIC ADD PARTITION FIELD hour(event_time)
 
-# b) Drop columns
-spark.sql("""
-    ALTER TABLE local.db.employees
-    DROP COLUMN bonus
-""")
+# COMMAND ----------
 
-# c) Rename columns
-spark.sql("""
-    ALTER TABLE local.db.employees
-    RENAME COLUMN name TO employee_name
-""")
+# MAGIC %md
+# MAGIC ## Problem 4: Time Travel
 
-# d) Reorder columns
-spark.sql("""
-    ALTER TABLE local.db.employees
-    ALTER COLUMN email AFTER employee_name
-""")
+# COMMAND ----------
 
-# e) Change types (widening only)
-spark.sql("""
-    ALTER TABLE local.db.employees
-    ALTER COLUMN emp_id TYPE BIGINT
-""")
+# MAGIC %sql
+# MAGIC -- a) View snapshots
+# MAGIC SELECT * FROM local.db.employees.snapshots
 
-# f) Change nullability
-spark.sql("""
-    ALTER TABLE local.db.employees
-    ALTER COLUMN emp_id DROP NOT NULL
-""")
+# COMMAND ----------
 
+# MAGIC %sql
+# MAGIC -- b) Query by timestamp
+# MAGIC SELECT * FROM local.db.employees TIMESTAMP AS OF '2024-01-15 10:00:00'
 
-# =============================================================================
-# Problem 6: Partition Evolution
-# =============================================================================
-# a) Add partition field
-spark.sql("""
-    ALTER TABLE local.db.events
-    ADD PARTITION FIELD hour(event_time)
-""")
+# COMMAND ----------
 
-# b) Remove partition field
-spark.sql("""
-    ALTER TABLE local.db.events
-    DROP PARTITION FIELD day(event_time)
-""")
+# Query by snapshot ID using DataFrame API
+# snapshot_id = spark.sql("SELECT snapshot_id FROM local.db.employees.snapshots LIMIT 1").first()[0]
+# df = spark.read.option("snapshot-id", snapshot_id).table("local.db.employees")
+# display(df)
 
-# c) Replace partition field
-spark.sql("""
-    ALTER TABLE local.db.events
-    REPLACE PARTITION FIELD day(event_time) WITH date(event_time)
-""")
+print("Time travel query explained!")
 
-# d) Query seamlessly across partition schemes
-# Iceberg handles different partition schemes automatically
-spark.sql("SELECT * FROM local.db.events WHERE event_time >= '2024-01-01'").show()
+# COMMAND ----------
 
+# MAGIC %sql
+# MAGIC -- c) View history
+# MAGIC SELECT * FROM local.db.employees.history
 
-# =============================================================================
-# Problem 7: Table Maintenance
-# =============================================================================
-# a) Expire snapshots
-spark.sql("""
-    CALL local.system.expire_snapshots(
-        table => 'db.employees',
-        older_than => TIMESTAMP '2024-01-01 00:00:00',
-        retain_last => 5
-    )
-""")
+# COMMAND ----------
 
-# b) Remove orphan files
-spark.sql("""
-    CALL local.system.remove_orphan_files(
-        table => 'db.employees',
-        older_than => TIMESTAMP '2024-01-01 00:00:00'
-    )
-""")
+# MAGIC %sql
+# MAGIC -- d) Roll back to snapshot
+# MAGIC -- CALL local.system.rollback_to_snapshot('db.employees', snapshot_id)
+# MAGIC -- Or by timestamp:
+# MAGIC -- CALL local.system.rollback_to_timestamp('db.employees', TIMESTAMP '2024-01-15 10:00:00')
 
-# c) Rewrite data files (compaction)
-spark.sql("""
-    CALL local.system.rewrite_data_files(
-        table => 'db.employees',
-        options => map('target-file-size-bytes', '134217728')
-    )
-""")
+# COMMAND ----------
 
-# d) Rewrite manifests
-spark.sql("""
-    CALL local.system.rewrite_manifests('db.employees')
-""")
+# MAGIC %md
+# MAGIC ## Problem 5: Schema Evolution
 
+# COMMAND ----------
 
-# =============================================================================
-# Problem 8: Branching and Tagging
-# =============================================================================
-# a) Create branch
-spark.sql("""
-    ALTER TABLE local.db.employees
-    CREATE BRANCH dev
-""")
+# MAGIC %sql
+# MAGIC -- a) Add columns
+# MAGIC ALTER TABLE local.db.employees
+# MAGIC ADD COLUMNS (
+# MAGIC     bonus DOUBLE,
+# MAGIC     email STRING
+# MAGIC )
 
-# b) Write to branch
-spark.sql("""
-    INSERT INTO local.db.employees.branch_dev
-    VALUES (999, 'Test', 'QA', 50000, DATE '2024-01-01', NULL, 'Test City')
-""")
+# COMMAND ----------
 
-# c) Read from branch
-spark.sql("SELECT * FROM local.db.employees VERSION AS OF 'dev'").show()
+# MAGIC %sql
+# MAGIC -- b) Drop columns
+# MAGIC ALTER TABLE local.db.employees
+# MAGIC DROP COLUMN bonus
 
-# d) Create tag
-spark.sql("""
-    ALTER TABLE local.db.employees
-    CREATE TAG release_v1
-""")
+# COMMAND ----------
 
-# e) Fast-forward merge
-spark.sql("""
-    CALL local.system.fast_forward('db.employees', 'main', 'dev')
-""")
+# MAGIC %sql
+# MAGIC -- c) Rename columns
+# MAGIC ALTER TABLE local.db.employees
+# MAGIC RENAME COLUMN name TO employee_name
 
+# COMMAND ----------
 
-# =============================================================================
-# Problem 9: Incremental Processing
-# =============================================================================
+# MAGIC %sql
+# MAGIC -- d) Reorder columns
+# MAGIC ALTER TABLE local.db.employees
+# MAGIC ALTER COLUMN email AFTER employee_name
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC -- e) Change types (widening only)
+# MAGIC ALTER TABLE local.db.employees
+# MAGIC ALTER COLUMN emp_id TYPE BIGINT
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Problem 6: Partition Evolution
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC -- a) Add partition field
+# MAGIC ALTER TABLE local.db.events
+# MAGIC ADD PARTITION FIELD hour(event_time)
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC -- b) Remove partition field
+# MAGIC ALTER TABLE local.db.events
+# MAGIC DROP PARTITION FIELD day(event_time)
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC -- c) Replace partition field
+# MAGIC ALTER TABLE local.db.events
+# MAGIC REPLACE PARTITION FIELD day(event_time) WITH date(event_time)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Partition Evolution Benefits:
+# MAGIC - No need to rewrite existing data
+# MAGIC - Queries work seamlessly across partition schemes
+# MAGIC - Iceberg handles different partition layouts automatically
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Problem 7: Table Maintenance
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC -- a) Expire snapshots
+# MAGIC CALL local.system.expire_snapshots(
+# MAGIC     table => 'db.employees',
+# MAGIC     older_than => TIMESTAMP '2024-01-01 00:00:00',
+# MAGIC     retain_last => 5
+# MAGIC )
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC -- b) Remove orphan files
+# MAGIC CALL local.system.remove_orphan_files(
+# MAGIC     table => 'db.employees',
+# MAGIC     older_than => TIMESTAMP '2024-01-01 00:00:00'
+# MAGIC )
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC -- c) Rewrite data files (compaction)
+# MAGIC CALL local.system.rewrite_data_files(
+# MAGIC     table => 'db.employees',
+# MAGIC     options => map('target-file-size-bytes', '134217728')
+# MAGIC )
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC -- d) Rewrite manifests
+# MAGIC CALL local.system.rewrite_manifests('db.employees')
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Problem 8: Branching and Tagging
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC -- a) Create branch
+# MAGIC ALTER TABLE local.db.employees
+# MAGIC CREATE BRANCH dev
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC -- b) Write to branch
+# MAGIC INSERT INTO local.db.employees.branch_dev
+# MAGIC VALUES (999, 'Test', 'QA', 50000, DATE '2024-01-01', NULL, 'Test City')
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC -- c) Read from branch
+# MAGIC SELECT * FROM local.db.employees VERSION AS OF 'dev'
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC -- d) Create tag
+# MAGIC ALTER TABLE local.db.employees
+# MAGIC CREATE TAG release_v1
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC -- e) Fast-forward merge
+# MAGIC CALL local.system.fast_forward('db.employees', 'main', 'dev')
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Problem 9: Incremental Processing
+
+# COMMAND ----------
+
 # a) Incremental read (append-only)
-spark.read \
-    .option("start-snapshot-id", start_snapshot) \
-    .option("end-snapshot-id", end_snapshot) \
-    .table("local.db.employees")
+# df = spark.read \
+#     .option("start-snapshot-id", start_snapshot) \
+#     .option("end-snapshot-id", end_snapshot) \
+#     .table("local.db.employees")
 
 # Or streaming
-stream_df = spark.readStream \
-    .format("iceberg") \
-    .option("stream-from-timestamp", "2024-01-01 00:00:00") \
-    .load("local.db.employees")
+# stream_df = spark.readStream \
+#     .format("iceberg") \
+#     .option("stream-from-timestamp", "2024-01-01 00:00:00") \
+#     .load("local.db.employees")
 
-# b) Write streaming
-# stream.writeStream.format("iceberg").toTable("local.db.target")
+print("Incremental processing explained!")
 
-# c) Track changes
-spark.sql("SELECT * FROM local.db.employees.snapshots ORDER BY committed_at DESC").show()
+# COMMAND ----------
 
+# MAGIC %md
+# MAGIC ## Problem 10: Metadata Tables
 
-# =============================================================================
-# Problem 10: Metadata Tables
-# =============================================================================
-# a) Snapshots
-spark.sql("SELECT * FROM local.db.employees.snapshots").show()
+# COMMAND ----------
 
-# b) History
-spark.sql("SELECT * FROM local.db.employees.history").show()
+# MAGIC %sql
+# MAGIC -- a) Snapshots
+# MAGIC SELECT * FROM local.db.employees.snapshots
 
-# c) Files
-spark.sql("SELECT * FROM local.db.employees.files").show()
+# COMMAND ----------
 
-# d) Manifests
-spark.sql("SELECT * FROM local.db.employees.manifests").show()
+# MAGIC %sql
+# MAGIC -- b) History
+# MAGIC SELECT * FROM local.db.employees.history
 
-# e) Partitions
-spark.sql("SELECT * FROM local.db.employees.partitions").show()
+# COMMAND ----------
 
-# Also available:
-# - entries (manifest entries)
-# - all_data_files
-# - all_manifests
+# MAGIC %sql
+# MAGIC -- c) Files
+# MAGIC SELECT * FROM local.db.employees.files
 
+# COMMAND ----------
 
-# =============================================================================
-# Problem 11: COW vs MOR
-# =============================================================================
-# a) Copy-on-write (default)
-spark.sql("""
-    ALTER TABLE local.db.employees
-    SET TBLPROPERTIES (
-        'write.delete.mode' = 'copy-on-write',
-        'write.update.mode' = 'copy-on-write',
-        'write.merge.mode' = 'copy-on-write'
-    )
-""")
+# MAGIC %sql
+# MAGIC -- d) Manifests
+# MAGIC SELECT * FROM local.db.employees.manifests
 
-# b) Merge-on-read
-spark.sql("""
-    ALTER TABLE local.db.employees
-    SET TBLPROPERTIES (
-        'write.delete.mode' = 'merge-on-read',
-        'write.update.mode' = 'merge-on-read',
-        'write.merge.mode' = 'merge-on-read'
-    )
-""")
+# COMMAND ----------
 
-# COW: Better read performance, slower writes
-# MOR: Faster writes, read-time merge overhead
+# MAGIC %sql
+# MAGIC -- e) Partitions
+# MAGIC SELECT * FROM local.db.employees.partitions
 
+# COMMAND ----------
 
-# =============================================================================
-# Problem 12: Performance Optimization
-# =============================================================================
-# a) Split configuration
-spark.sql("""
-    ALTER TABLE local.db.employees SET TBLPROPERTIES (
-        'read.split.target-size' = '134217728',
-        'read.split.planning-lookback' = '10'
-    )
-""")
+# MAGIC %md
+# MAGIC ## Problem 11: COW vs MOR
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC -- a) Copy-on-write (default) - better read performance
+# MAGIC ALTER TABLE local.db.employees
+# MAGIC SET TBLPROPERTIES (
+# MAGIC     'write.delete.mode' = 'copy-on-write',
+# MAGIC     'write.update.mode' = 'copy-on-write',
+# MAGIC     'write.merge.mode' = 'copy-on-write'
+# MAGIC )
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC -- b) Merge-on-read - faster writes
+# MAGIC ALTER TABLE local.db.employees
+# MAGIC SET TBLPROPERTIES (
+# MAGIC     'write.delete.mode' = 'merge-on-read',
+# MAGIC     'write.update.mode' = 'merge-on-read',
+# MAGIC     'write.merge.mode' = 'merge-on-read'
+# MAGIC )
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### COW vs MOR:
+# MAGIC | Mode | Write Speed | Read Speed | Use Case |
+# MAGIC |------|------------|------------|----------|
+# MAGIC | **COW** | Slower | Faster | Read-heavy workloads |
+# MAGIC | **MOR** | Faster | Slower | Write-heavy workloads |
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Problem 12: Performance Optimization
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC -- a) Split configuration
+# MAGIC ALTER TABLE local.db.employees SET TBLPROPERTIES (
+# MAGIC     'read.split.target-size' = '134217728',
+# MAGIC     'read.split.planning-lookback' = '10'
+# MAGIC )
+
+# COMMAND ----------
 
 # b) Vectorized reads
 spark.conf.set("spark.sql.iceberg.vectorization.enabled", "true")
+print("Vectorized reads enabled!")
 
-# c) File sizes
-spark.sql("""
-    ALTER TABLE local.db.employees SET TBLPROPERTIES (
-        'write.target-file-size-bytes' = '134217728',
-        'write.parquet.row-group-size-bytes' = '8388608'
-    )
-""")
+# COMMAND ----------
 
-# d) Sort order
-spark.sql("""
-    ALTER TABLE local.db.employees
-    WRITE ORDERED BY (department, salary DESC)
-""")
+# MAGIC %sql
+# MAGIC -- c) File sizes
+# MAGIC ALTER TABLE local.db.employees SET TBLPROPERTIES (
+# MAGIC     'write.target-file-size-bytes' = '134217728',
+# MAGIC     'write.parquet.row-group-size-bytes' = '8388608'
+# MAGIC )
 
-# e) Bloom filters
-spark.sql("""
-    ALTER TABLE local.db.employees SET TBLPROPERTIES (
-        'write.parquet.bloom-filter-enabled.column.emp_id' = 'true'
-    )
-""")
+# COMMAND ----------
 
+# MAGIC %sql
+# MAGIC -- d) Sort order
+# MAGIC ALTER TABLE local.db.employees
+# MAGIC WRITE ORDERED BY (department, salary DESC)
 
-# =============================================================================
-# Problem 13: Multi-catalog
-# =============================================================================
-# Configuration example
-"""
-spark.sql.catalog.prod = org.apache.iceberg.spark.SparkCatalog
-spark.sql.catalog.prod.type = hive
-spark.sql.catalog.prod.uri = thrift://metastore:9083
+# COMMAND ----------
 
-spark.sql.catalog.dev = org.apache.iceberg.spark.SparkCatalog
-spark.sql.catalog.dev.type = hadoop
-spark.sql.catalog.dev.warehouse = s3://dev-bucket/warehouse
+# MAGIC %sql
+# MAGIC -- e) Bloom filters
+# MAGIC ALTER TABLE local.db.employees SET TBLPROPERTIES (
+# MAGIC     'write.parquet.bloom-filter-enabled.column.emp_id' = 'true'
+# MAGIC )
 
-spark.sql.catalog.glue = org.apache.iceberg.spark.SparkCatalog
-spark.sql.catalog.glue.catalog-impl = org.apache.iceberg.aws.glue.GlueCatalog
-spark.sql.catalog.glue.warehouse = s3://bucket/warehouse
-"""
+# COMMAND ----------
 
-# Query across catalogs
-# SELECT * FROM prod.db.table
-# SELECT * FROM dev.db.table
+# MAGIC %md
+# MAGIC ## Problem 13: Complete Pipeline
 
+# COMMAND ----------
 
-# =============================================================================
-# Problem 14: Row-Level Operations
-# =============================================================================
-# Position deletes (efficient for small deletes)
-# Stored separately, merged at read time
+# MAGIC %sql
+# MAGIC -- 1. Create fact table with hidden partitioning
+# MAGIC CREATE TABLE local.warehouse.sales_facts (
+# MAGIC     transaction_id STRING,
+# MAGIC     product_id STRING,
+# MAGIC     customer_id STRING,
+# MAGIC     quantity INT,
+# MAGIC     amount DOUBLE,
+# MAGIC     transaction_time TIMESTAMP
+# MAGIC )
+# MAGIC USING iceberg
+# MAGIC PARTITIONED BY (day(transaction_time))
+# MAGIC TBLPROPERTIES (
+# MAGIC     'write.target-file-size-bytes' = '134217728',
+# MAGIC     'format-version' = '2'
+# MAGIC )
 
-# Equality deletes (for streaming deletes)
-spark.sql("""
-    ALTER TABLE local.db.employees SET TBLPROPERTIES (
-        'write.delete.mode' = 'merge-on-read'
-    )
-""")
+# COMMAND ----------
 
+# MAGIC %sql
+# MAGIC -- 2. SCD Type 2 dimension
+# MAGIC CREATE TABLE local.warehouse.dim_customer (
+# MAGIC     customer_key BIGINT,
+# MAGIC     customer_id STRING,
+# MAGIC     name STRING,
+# MAGIC     email STRING,
+# MAGIC     effective_from TIMESTAMP,
+# MAGIC     effective_to TIMESTAMP,
+# MAGIC     is_current BOOLEAN
+# MAGIC )
+# MAGIC USING iceberg
 
-# =============================================================================
-# Problem 15: Complete Pipeline
-# =============================================================================
-# 1. Create fact table with hidden partitioning
-spark.sql("""
-    CREATE TABLE local.warehouse.sales_facts (
-        transaction_id STRING,
-        product_id STRING,
-        customer_id STRING,
-        quantity INT,
-        amount DOUBLE,
-        transaction_time TIMESTAMP
-    )
-    USING iceberg
-    PARTITIONED BY (day(transaction_time))
-    TBLPROPERTIES (
-        'write.target-file-size-bytes' = '134217728',
-        'format-version' = '2'
-    )
-""")
+# COMMAND ----------
 
-# 2. SCD Type 2 dimension
-spark.sql("""
-    CREATE TABLE local.warehouse.dim_customer (
-        customer_key BIGINT,
-        customer_id STRING,
-        name STRING,
-        email STRING,
-        effective_from TIMESTAMP,
-        effective_to TIMESTAMP,
-        is_current BOOLEAN
-    )
-    USING iceberg
-""")
+# MAGIC %sql
+# MAGIC -- 3. SCD2 MERGE
+# MAGIC MERGE INTO local.warehouse.dim_customer t
+# MAGIC USING (
+# MAGIC     SELECT *, current_timestamp() as load_time FROM staging_customers
+# MAGIC ) s
+# MAGIC ON t.customer_id = s.customer_id AND t.is_current = true
+# MAGIC WHEN MATCHED AND t.name != s.name OR t.email != s.email THEN
+# MAGIC     UPDATE SET is_current = false, effective_to = s.load_time
+# MAGIC WHEN NOT MATCHED THEN
+# MAGIC     INSERT (customer_key, customer_id, name, email, effective_from, effective_to, is_current)
+# MAGIC     VALUES (s.customer_key, s.customer_id, s.name, s.email, s.load_time, NULL, true)
 
-# SCD2 MERGE
-spark.sql("""
-    MERGE INTO local.warehouse.dim_customer t
-    USING (
-        SELECT *, current_timestamp() as load_time FROM staging_customers
-    ) s
-    ON t.customer_id = s.customer_id AND t.is_current = true
-    WHEN MATCHED AND t.name != s.name OR t.email != s.email THEN
-        UPDATE SET is_current = false, effective_to = s.load_time
-    WHEN NOT MATCHED THEN
-        INSERT (customer_key, customer_id, name, email, effective_from, effective_to, is_current)
-        VALUES (s.customer_key, s.customer_id, s.name, s.email, s.load_time, NULL, true)
-""")
+# COMMAND ----------
 
-# 3. Incremental fact loading
-spark.sql("""
-    INSERT INTO local.warehouse.sales_facts
-    SELECT * FROM staging_sales
-    WHERE transaction_time > (SELECT MAX(transaction_time) FROM local.warehouse.sales_facts)
-""")
+# MAGIC %sql
+# MAGIC -- 4. Maintenance
+# MAGIC CALL local.system.expire_snapshots('warehouse.sales_facts', retain_last => 10);
+# MAGIC CALL local.system.rewrite_data_files('warehouse.sales_facts')
 
-# 4. Maintenance
-spark.sql("CALL local.system.expire_snapshots('warehouse.sales_facts', retain_last => 10)")
-spark.sql("CALL local.system.rewrite_data_files('warehouse.sales_facts')")
+# COMMAND ----------
 
-# 5. Time travel audit
-spark.sql("""
-    SELECT * FROM local.warehouse.sales_facts
-    TIMESTAMP AS OF '2024-01-15 00:00:00'
-    WHERE transaction_id = 'TXN001'
-""")
+# MAGIC %md
+# MAGIC ## Iceberg vs Delta Lake
+# MAGIC
+# MAGIC | Feature | Iceberg | Delta Lake |
+# MAGIC |---------|---------|------------|
+# MAGIC | **Hidden Partitioning** | Yes (transforms) | No |
+# MAGIC | **Partition Evolution** | Yes | Limited |
+# MAGIC | **Schema Evolution** | Full support | Full support |
+# MAGIC | **Time Travel** | Snapshot-based | Version-based |
+# MAGIC | **Branching** | Native | Tags only |
+# MAGIC | **File Formats** | Parquet, ORC, Avro | Parquet only |
+# MAGIC | **Engine Support** | Multi-engine | Spark-native |

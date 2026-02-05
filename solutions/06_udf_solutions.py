@@ -1,9 +1,15 @@
-"""
-User Defined Functions (UDFs) - Solutions
-==========================================
-"""
+# Databricks notebook source
+# MAGIC %md
+# MAGIC # User Defined Functions (UDFs) - Solutions
+# MAGIC Topics: Python UDFs, Pandas UDFs, SQL registration, performance
 
-from pyspark.sql import SparkSession
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Setup
+
+# COMMAND ----------
+
 from pyspark.sql.functions import udf, pandas_udf, col, lit, struct
 from pyspark.sql.types import (
     StringType, IntegerType, DoubleType, ArrayType,
@@ -11,14 +17,20 @@ from pyspark.sql.types import (
 )
 import pandas as pd
 
-spark = SparkSession.builder.appName("UDF Solutions").getOrCreate()
+# COMMAND ----------
 
-employees = spark.read.csv("../datasets/csv/employees.csv", header=True, inferSchema=True)
-sales = spark.read.csv("../datasets/csv/sales.csv", header=True, inferSchema=True)
+employees = spark.read.csv("datasets/csv/employees.csv", header=True, inferSchema=True)
+sales = spark.read.csv("datasets/csv/sales.csv", header=True, inferSchema=True)
 
-# =============================================================================
-# Problem 1: Basic Python UDF
-# =============================================================================
+display(employees)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Problem 1: Basic Python UDF
+
+# COMMAND ----------
+
 # a) Tax calculation UDF
 def calculate_tax(salary):
     if salary is None:
@@ -26,7 +38,9 @@ def calculate_tax(salary):
     return salary * 0.30
 
 tax_udf = udf(calculate_tax, DoubleType())
-employees.withColumn("tax", tax_udf(col("salary"))).show()
+display(employees.withColumn("tax", tax_udf(col("salary"))))
+
+# COMMAND ----------
 
 # b) Salary category UDF
 def categorize_salary(salary):
@@ -40,7 +54,9 @@ def categorize_salary(salary):
         return "High"
 
 salary_category_udf = udf(categorize_salary, StringType())
-employees.withColumn("salary_category", salary_category_udf(col("salary"))).show()
+display(employees.withColumn("salary_category", salary_category_udf(col("salary"))))
+
+# COMMAND ----------
 
 # c) Name formatting UDF
 def format_name(name):
@@ -52,12 +68,15 @@ def format_name(name):
     return name
 
 format_name_udf = udf(format_name, StringType())
-employees.withColumn("formatted_name", format_name_udf(col("name"))).show()
+display(employees.withColumn("formatted_name", format_name_udf(col("name"))))
 
+# COMMAND ----------
 
-# =============================================================================
-# Problem 2: UDF with Multiple Arguments
-# =============================================================================
+# MAGIC %md
+# MAGIC ## Problem 2: UDF with Multiple Arguments
+
+# COMMAND ----------
+
 # a) Bonus based on salary and department
 def calculate_bonus(salary, department):
     if salary is None or department is None:
@@ -67,7 +86,9 @@ def calculate_bonus(salary, department):
     return salary * rate
 
 bonus_udf = udf(calculate_bonus, DoubleType())
-employees.withColumn("bonus", bonus_udf(col("salary"), col("department"))).show()
+display(employees.withColumn("bonus", bonus_udf(col("salary"), col("department"))))
+
+# COMMAND ----------
 
 # b) Full address UDF
 def format_address(city, state="NY", country="USA"):
@@ -75,19 +96,24 @@ def format_address(city, state="NY", country="USA"):
     return ", ".join(parts)
 
 address_udf = udf(format_address, StringType())
-employees.withColumn("address", address_udf(col("city"), lit("NY"), lit("USA"))).show()
+display(employees.withColumn("address", address_udf(col("city"), lit("NY"), lit("USA"))))
+
+# COMMAND ----------
 
 # c) Custom formatting
 def custom_format(name, salary, dept):
     return f"{name} ({dept}): ${salary:,.0f}" if all([name, salary, dept]) else "N/A"
 
 format_udf = udf(custom_format, StringType())
-employees.withColumn("summary", format_udf(col("name"), col("salary"), col("department"))).show(truncate=False)
+display(employees.withColumn("summary", format_udf(col("name"), col("salary"), col("department"))))
 
+# COMMAND ----------
 
-# =============================================================================
-# Problem 3: UDF Returning Complex Types
-# =============================================================================
+# MAGIC %md
+# MAGIC ## Problem 3: UDF Returning Complex Types
+
+# COMMAND ----------
+
 # a) Return array of name parts
 def split_name(name):
     if name is None:
@@ -95,7 +121,9 @@ def split_name(name):
     return name.split()
 
 split_name_udf = udf(split_name, ArrayType(StringType()))
-employees.withColumn("name_parts", split_name_udf(col("name"))).show(truncate=False)
+display(employees.withColumn("name_parts", split_name_udf(col("name"))))
+
+# COMMAND ----------
 
 # b) Return struct with computed fields
 employee_struct_schema = StructType([
@@ -113,9 +141,11 @@ def compute_employee_info(salary):
     return (tax, net, category)
 
 employee_info_udf = udf(compute_employee_info, employee_struct_schema)
-employees.withColumn("emp_info", employee_info_udf(col("salary"))).select(
+display(employees.withColumn("emp_info", employee_info_udf(col("salary"))).select(
     "name", "salary", "emp_info.*"
-).show()
+))
+
+# COMMAND ----------
 
 # c) Return map/dictionary
 def create_salary_breakdown(salary):
@@ -129,12 +159,15 @@ def create_salary_breakdown(salary):
     }
 
 breakdown_udf = udf(create_salary_breakdown, MapType(StringType(), DoubleType()))
-employees.withColumn("breakdown", breakdown_udf(col("salary"))).show(truncate=False)
+display(employees.withColumn("breakdown", breakdown_udf(col("salary"))))
 
+# COMMAND ----------
 
-# =============================================================================
-# Problem 4: Registering UDFs for SQL
-# =============================================================================
+# MAGIC %md
+# MAGIC ## Problem 4: Registering UDFs for SQL
+
+# COMMAND ----------
+
 # a) Register function for SQL
 def salary_grade(salary):
     if salary is None:
@@ -150,47 +183,61 @@ def salary_grade(salary):
 
 spark.udf.register("salary_grade", salary_grade, StringType())
 
+# COMMAND ----------
+
 # b) Use in SQL query
 employees.createOrReplaceTempView("employees")
-spark.sql("""
-    SELECT name, salary, salary_grade(salary) as grade
-    FROM employees
-    ORDER BY salary DESC
-""").show()
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC SELECT name, salary, salary_grade(salary) as grade
+# MAGIC FROM employees
+# MAGIC ORDER BY salary DESC
+
+# COMMAND ----------
 
 # c) Register with explicit return type
 spark.udf.register("double_salary", lambda x: x * 2 if x else None, DoubleType())
-spark.sql("SELECT name, salary, double_salary(salary) as doubled FROM employees").show()
 
+# COMMAND ----------
 
-# =============================================================================
-# Problem 5: Pandas UDF - Scalar
-# =============================================================================
+# MAGIC %sql
+# MAGIC SELECT name, salary, double_salary(salary) as doubled FROM employees
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Problem 5: Pandas UDF - Scalar
+
+# COMMAND ----------
+
 # a) Scalar Pandas UDF
 @pandas_udf(DoubleType())
 def pandas_tax_calc(salary: pd.Series) -> pd.Series:
     return salary * 0.30
 
-employees.withColumn("tax_pandas", pandas_tax_calc(col("salary"))).show()
+display(employees.withColumn("tax_pandas", pandas_tax_calc(col("salary"))))
 
-# b) Performance comparison (conceptual - Pandas UDFs are faster for large data)
-# Regular UDF processes row by row
-# Pandas UDF processes in batches using Arrow
+# COMMAND ----------
 
 # c) Pandas string methods
 @pandas_udf(StringType())
 def pandas_upper(name: pd.Series) -> pd.Series:
     return name.str.upper()
 
-employees.withColumn("name_upper", pandas_upper(col("name"))).show()
+display(employees.withColumn("name_upper", pandas_upper(col("name"))))
 
+# COMMAND ----------
 
-# =============================================================================
-# Problem 6: Pandas UDF - Grouped Map
-# =============================================================================
-# a) Normalize salaries within department
+# MAGIC %md
+# MAGIC ## Problem 6: Pandas UDF - Grouped Map
+
+# COMMAND ----------
+
 from pyspark.sql.functions import pandas_udf, PandasUDFType
 
+# a) Normalize salaries within department
 schema = StructType([
     StructField("emp_id", IntegerType()),
     StructField("name", StringType()),
@@ -210,35 +257,33 @@ def normalize_salary(pdf: pd.DataFrame) -> pd.DataFrame:
         pdf["normalized_salary"] = 0.0
     return pdf[["emp_id", "name", "department", "salary", "normalized_salary"]]
 
-employees.select("emp_id", "name", "department", "salary").groupBy("department").apply(
+display(employees.select("emp_id", "name", "department", "salary").groupBy("department").apply(
     normalize_salary
-).show()
+))
 
+# COMMAND ----------
 
-# =============================================================================
-# Problem 7: Pandas UDF - Grouped Aggregate
-# =============================================================================
-# a) Custom aggregation
-@pandas_udf(DoubleType())
-def weighted_avg(values: pd.Series, weights: pd.Series) -> float:
-    return (values * weights).sum() / weights.sum()
+# MAGIC %md
+# MAGIC ## Problem 7: Pandas UDF - Grouped Aggregate
 
-# Usage example (conceptual)
-# df.groupBy("group").agg(weighted_avg(col("value"), col("weight")))
+# COMMAND ----------
 
-# b) Weighted average example
+# Custom aggregation - salary range
 @pandas_udf(DoubleType())
 def salary_range(salary: pd.Series) -> float:
-    return salary.max() - salary.min()
+    return float(salary.max() - salary.min())
 
-employees.groupBy("department").agg(
+display(employees.groupBy("department").agg(
     salary_range(col("salary")).alias("salary_range")
-).show()
+))
 
+# COMMAND ----------
 
-# =============================================================================
-# Problem 8: Error Handling in UDFs
-# =============================================================================
+# MAGIC %md
+# MAGIC ## Problem 8: Error Handling in UDFs
+
+# COMMAND ----------
+
 # a) Handle null values
 def safe_divide(a, b):
     if a is None or b is None or b == 0:
@@ -261,16 +306,21 @@ def safe_operation(value, default=-1):
     try:
         if value is None:
             return default
-        return value * 2
+        return int(value * 2)
     except Exception:
         return default
 
 safe_op_udf = udf(safe_operation, IntegerType())
 
+print("Error handling UDFs defined successfully!")
 
-# =============================================================================
-# Problem 9: UDF Performance Optimization
-# =============================================================================
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Problem 9: UDF Performance Optimization
+
+# COMMAND ----------
+
 # a) Broadcast variable in UDF
 dept_multipliers = {"Engineering": 1.2, "Sales": 1.15, "HR": 1.1, "Marketing": 1.12}
 bc_multipliers = spark.sparkContext.broadcast(dept_multipliers)
@@ -282,21 +332,24 @@ def apply_multiplier(salary, dept):
     return salary * multiplier
 
 multiplier_udf = udf(apply_multiplier, DoubleType())
-employees.withColumn("adjusted_salary", multiplier_udf(col("salary"), col("department"))).show()
+display(employees.withColumn("adjusted_salary", multiplier_udf(col("salary"), col("department"))))
+
+# COMMAND ----------
 
 # b) Prefer built-in functions over UDFs
-# BAD: Using UDF for simple operations
-# upper_udf = udf(lambda x: x.upper() if x else None, StringType())
-
-# GOOD: Use built-in function
 from pyspark.sql.functions import upper
-employees.withColumn("name_upper", upper(col("name"))).show()
 
+# GOOD: Use built-in function (vectorized, optimized)
+display(employees.withColumn("name_upper", upper(col("name"))))
 
-# =============================================================================
-# Problem 10: Advanced UDF Scenarios
-# =============================================================================
-# a) UDF using external library
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Problem 10: Advanced UDF Scenarios
+
+# COMMAND ----------
+
+# a) UDF using external library (regex)
 import re
 
 def extract_initials(name):
@@ -306,7 +359,9 @@ def extract_initials(name):
     return ''.join(words).upper()
 
 initials_udf = udf(extract_initials, StringType())
-employees.withColumn("initials", initials_udf(col("name"))).show()
+display(employees.withColumn("initials", initials_udf(col("name"))))
+
+# COMMAND ----------
 
 # b) UDF with closure
 threshold = 80000
@@ -315,28 +370,35 @@ def above_threshold(salary, threshold=threshold):
     return salary > threshold if salary else False
 
 above_threshold_udf = udf(above_threshold, BooleanType())
-employees.withColumn("above_80k", above_threshold_udf(col("salary"))).show()
+display(employees.withColumn("above_80k", above_threshold_udf(col("salary"))))
+
+# COMMAND ----------
 
 # c) Chaining UDFs
-employees.withColumn(
+display(employees.withColumn(
     "formatted", format_name_udf(col("name"))
 ).withColumn(
     "category", salary_category_udf(col("salary"))
 ).withColumn(
     "tax", tax_udf(col("salary"))
-).show()
+))
 
+# COMMAND ----------
 
-# =============================================================================
-# Problem 11: Type Hints with Pandas UDFs
-# =============================================================================
+# MAGIC %md
+# MAGIC ## Problem 11: Type Hints with Pandas UDFs
+
+# COMMAND ----------
+
 # Modern Pandas UDF syntax with type hints
 @pandas_udf("double")
 def modern_tax_calc(s: pd.Series) -> pd.Series:
     """Calculate tax using modern pandas_udf syntax."""
     return s * 0.30
 
-employees.withColumn("tax", modern_tax_calc("salary")).show()
+display(employees.withColumn("tax", modern_tax_calc("salary")))
+
+# COMMAND ----------
 
 # Iterator of Series for better memory efficiency
 from typing import Iterator
@@ -346,4 +408,4 @@ def process_names(iterator: Iterator[pd.Series]) -> Iterator[pd.Series]:
     for batch in iterator:
         yield batch.str.upper()
 
-employees.withColumn("name_upper", process_names("name")).show()
+display(employees.withColumn("name_upper", process_names("name")))
